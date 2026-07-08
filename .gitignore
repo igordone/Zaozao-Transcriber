@@ -1,0 +1,6 @@
+node_modules/
+.env
+src/output/*.wav
+src/output/*.ogg
+src/output/*.pcm
+*.log
