@@ -3,8 +3,24 @@ import prism from 'prism-media';
 import wav from 'wav';
 import { mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
+import { Transform } from 'stream';
 
 const activeSessions = new Map();
+
+// Filtra pacotes Opus pequenos demais, que o prism-media não consegue processar
+// sem quebrar (bug conhecido: https://github.com/amishshah/prism-media/issues/104)
+function createSafeOpusFilter() {
+  return new Transform({
+    transform(chunk, encoding, callback) {
+      if (chunk.length < 8) {
+        // Descarta silenciosamente — é um frame de silêncio, sem áudio real
+        callback();
+        return;
+      }
+      callback(null, chunk);
+    },
+  });
+}
 
 export function startRecording(voiceChannel) {
   const guildId = voiceChannel.guild.id;
@@ -58,6 +74,8 @@ export function startRecording(voiceChannel) {
       end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
     });
 
+    const safeFilter = createSafeOpusFilter();
+
     const decoder = new prism.opus.Decoder({
       rate: 48000,
       channels: 2,
@@ -76,7 +94,8 @@ export function startRecording(voiceChannel) {
     wavWriter.on('error', (err) => console.error(`❌ Erro ao escrever WAV de ${userId}:`, err));
     wavWriter.on('done', () => console.log(`💾 Arquivo salvo: ${filename}`));
 
-    opusStream.pipe(decoder).pipe(wavWriter);
+    opusStream.pipe(safeFilter).pipe(decoder).pipe(wavWriter);
+    safeFilter.on('error', (err) => console.warn(`⚠️ Erro no filtro de ${userId}:`, err.message));
 
     userStreams.set(userId, { opusStream, filename });
 
