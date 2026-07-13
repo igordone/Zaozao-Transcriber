@@ -1,36 +1,37 @@
 # Discord RPG Transcriber
 
-Bot que entra em um canal de voz do Discord, grava a sessão (um arquivo `.wav` por
-pessoa, por trecho de fala) e transcreve tudo em texto narrativo, separado por
-personagem/jogador.
+Bot que entra em um canal de voz do Discord, grava a sessão e transcreve tudo em texto
+narrativo, separado por personagem/jogador — com uma etapa opcional que reescreve a
+transcrição bruta como um capítulo de livro de fantasia, resumindo mecânica de jogo,
+combates repetitivos e conversa fora de personagem.
 
-Feito pensando em sessões de RPG de mesa jogadas por voz no Discord — a ideia é que,
-no final da sessão, você tenha um `.md` legível com a narrativa da mesa, sem precisar
+Feito pensando em sessões de RPG de mesa jogadas por voz no Discord — a ideia é que, no
+final da sessão, você tenha um `.md` legível com a narrativa da mesa, sem precisar
 anotar nada durante o jogo.
 
 ## Status atual
 
-- [x] Bot entra no canal de voz via `/sessao iniciar`
-- [x] Grava cada pessoa separadamente em `.wav`
-- [x] Sai do canal via `/sessao parar`
-- [x] Transcrição via API da Groq (Whisper)
-- [x] Filtro de alucinações do Whisper (silêncio/ruído)
+- [x] Bot entra no canal de voz via `/sessao iniciar` e grava cada pessoa separadamente
+- [x] Fusão de áudio por pessoa antes da transcrição (grande ganho de velocidade)
+- [x] Transcrição com fallback em cascata (Groq → Whisper local)
+- [x] Narrativa com fallback em cascata (Groq → Ollama Cloud → Ollama local)
+- [x] Filtro de alucinações do Whisper (silêncio, ruído, frases genéricas repetidas)
 - [x] Mapeamento de ID do Discord → nome de personagem
-- [x] Retry automático em caso de rate limit da API
-- [x] Salvamento incremental (nunca perde progresso se a transcrição falhar no meio)
-- [ ] Resumo automático da sessão (`/sessao resumo`) — não implementado ainda
-- [ ] Detecção automática de novos personagens no `characters.json`
+- [x] Salvamento incremental em cada etapa (nunca perde progresso se travar no meio)
+- [x] Marcadores de tempo de início/fim de cada etapa no console
+- [ ] Resumo automático via comando `/sessao resumo` — não implementado ainda
+- [ ] Detecção automática de personagens novos (hoje exige edição manual do `characters.json`)
 
 ## Requisitos
 
-- **Node.js 18+** (o projeto usa `fetch`, `FormData` e `Blob` nativos do Node — se
-  você está no Node 22 como no desenvolvimento original, não precisa instalar nada
-  extra pra isso)
-- **ffmpeg** instalado no sistema (usado para inspecionar/validar arquivos de áudio
-  durante o desenvolvimento; não é uma dependência direta do bot em runtime)
+- **Node.js 18+**
+- **ffmpeg** (via `ffmpeg-static`, já incluso nas dependências — não precisa instalar
+  separadamente no sistema, embora não tenha problema se você já tiver um)
 - Uma aplicação de bot criada no [Discord Developer Portal](https://discord.com/developers/applications)
-- Uma chave de API da [Groq](https://console.groq.com/keys) (usada para transcrição
-  via Whisper)
+- Uma chave de API da [Groq](https://console.groq.com/keys) (transcrição via Whisper e
+  narrativa via LLM de texto)
+- [Ollama](https://ollama.com) instalado (usado como respaldo local/nuvem quando a
+  cota da Groq se esgota)
 
 ## Instalação
 
@@ -38,16 +39,19 @@ anotar nada durante o jogo.
 npm install
 ```
 
-Isso instala, entre outras coisas:
+Principais pacotes e para que servem:
 
 | Pacote | Para que serve |
 |---|---|
 | `discord.js` | Interação com a API do Discord (comandos, eventos) |
 | `@discordjs/voice` | Conexão e captura de áudio em canais de voz |
-| `@snazzah/davey` | Suporte ao protocolo DAVE (criptografia ponta-a-ponta obrigatória da Discord desde março de 2026) |
-| `sodium-native` | Biblioteca de criptografia exigida pelo `@discordjs/voice` |
-| `prism-media` | Decodificação do áudio Opus recebido do Discord |
-| `wav` | Escrita de arquivos `.wav` válidos (com cabeçalho correto) a partir do PCM decodificado |
+| `@snazzah/davey` | Suporte ao protocolo DAVE (criptografia ponta-a-ponta obrigatória em canais de voz da Discord desde março de 2026) |
+| `sodium-native` | Criptografia exigida pelo `@discordjs/voice` |
+| `prism-media` (versão `2.0.0-alpha.0`, **fixada**) | Decodificação do áudio Opus recebido do Discord |
+| `wav` | Escrita de `.wav` válidos a partir do PCM decodificado |
+| `ffmpeg-static` | Fusão e compressão dos áudios antes da transcrição |
+| `@lumen-labs-dev/whisper-node` | Whisper local (binários pré-compilados no Windows, sem precisar compilar nada) |
+| `yaml` | Leitura do arquivo de configuração `config.yaml` |
 | `dotenv` | Carregamento de variáveis de ambiente do `.env` |
 
 ## Configuração
@@ -55,17 +59,17 @@ Isso instala, entre outras coisas:
 ### 1. Criar o bot no Discord Developer Portal
 
 1. Acesse https://discord.com/developers/applications → **New Application**
-2. No menu lateral, vá em **Bot** → **Reset Token** (ou copie o token existente)
+2. **Bot** → **Reset Token** (ou copie o token existente)
 3. Ative os **Privileged Gateway Intents**: `Server Members Intent` e
    `Message Content Intent`
-4. Em **OAuth2 → URL Generator**, marque os escopos `bot` e `applications.commands`
+4. **OAuth2 → URL Generator** → marque os escopos `bot` e `applications.commands`
 5. Em **Bot Permissions**, marque: `Connect`, `Speak`, `Use Voice Activity`,
    `Send Messages`, `View Channels`
 6. Use a URL gerada para convidar o bot para o seu servidor
 
 ### 2. Preencher o `.env`
 
-Copie o `.env.example` para `.env` e preencha:
+Copie `.env.example` para `.env`:
 
 ```
 DISCORD_TOKEN=
@@ -78,8 +82,8 @@ GROQ_API_KEY=
 |---|---|
 | `DISCORD_TOKEN` | Developer Portal → Bot → Token |
 | `CLIENT_ID` | Developer Portal → General Information → Application ID |
-| `GUILD_ID` | No Discord, com o Modo Desenvolvedor ativado: botão direito no servidor → Copiar ID do Servidor |
-| `GROQ_API_KEY` | https://console.groq.com/keys → Create new secret key |
+| `GUILD_ID` | Discord (Modo Desenvolvedor ativado) → botão direito no servidor → Copiar ID do Servidor |
+| `GROQ_API_KEY` | https://console.groq.com/keys |
 
 ### 3. Registrar os slash commands
 
@@ -87,32 +91,76 @@ GROQ_API_KEY=
 npm run register
 ```
 
-Isso registra o comando `/sessao` no servidor especificado em `GUILD_ID`. Precisa ser
-rodado de novo sempre que a estrutura de comandos mudar (novos subcomandos, etc).
+Só precisa rodar de novo se a estrutura de comandos mudar.
 
 ### 4. Preencher `src/characters.json`
 
-Esse arquivo mapeia o ID de cada pessoa no Discord para o nome do personagem que
-deve aparecer na transcrição final:
+Mapeia o ID de cada pessoa no Discord para o nome do personagem:
 
 ```json
 {
-  "128597385331998721": {
-    "name": "Lucan",
-    "role": "player"
-  },
-  "255699569042522112": {
-    "name": "Mestre Aldric",
-    "role": "master"
-  }
+  "128597385331998721": { "name": "Lucan", "role": "player" },
+  "255699569042522112": { "name": "Mestre Aldric", "role": "master" }
 }
 ```
 
-- `role: "player"` → a fala aparece como `**Nome:** texto`
-- `role: "master"` → a fala aparece destacada como narração: `> **Nome (Master):** texto`
+- `role: "player"` → fala aparece como `**Nome:** texto`
+- `role: "master"` → fala aparece destacada como narração: `> **Nome (Master):** texto`
 
-Você descobre o ID de cada pessoa observando o console do bot na primeira vez que ela
-fala durante uma gravação (aparece como `🎤 Detectado início de fala: [ID]`).
+Você descobre o ID de cada pessoa no console do bot, na primeira vez que ela fala
+(`🎤 Detectado início de fala: [ID]`).
+
+### 5. Configurar o `config.yaml`
+
+Esse arquivo controla qual provedor cada etapa usa. Exemplo completo:
+
+```yaml
+transcription:
+  # 'groq', 'local', ou 'fallback' (tenta Groq, cai pro Whisper local se precisar)
+  provider: 'fallback'
+  groq:
+    model: 'whisper-large-v3-turbo'
+  local:
+    model: 'small'   # tiny | base | small | medium | large
+
+narrative:
+  enabled: true
+  # 'groq', 'ollama', ou 'fallback' (Groq → Ollama Cloud → Ollama local)
+  provider: 'fallback'
+  groq:
+    model: 'llama-3.1-8b-instant'
+  ollama_cloud:
+    base_url: 'http://localhost:11434/v1'
+    model: 'gemma4:cloud'
+  ollama:
+    base_url: 'http://localhost:11434/v1'
+    model: 'llama3.1'
+  condense_prompt: |
+    (resume cada pedaço da transcrição em tópicos enxutos, sem mecânica de jogo)
+  final_prompt: |
+    (funde todos os resumos numa narrativa única, estilo capítulo de livro)
+```
+
+### 6. Baixar os modelos do Whisper local e do Ollama
+
+```powershell
+npx @lumen-labs-dev/whisper-node download
+```
+Escolha `small` (ou o modelo definido em `transcription.local.model`).
+
+```powershell
+ollama pull llama3.1
+```
+Modelo local leve, usado como último nível de respaldo na narrativa. Rode
+`ollama serve` (ou abra o app) antes de transcrever, e confirme que está de pé com
+`curl http://localhost:11434`.
+
+**Nota sobre modelos maiores:** modelos como `qwen3.6` (~23GB) podem não ser viáveis
+dependendo da sua RAM/GPU — nesse projeto, uma GPU AMD sem suporte CUDA completo faz
+esses modelos caírem para CPU pura, o que pode ser inviavelmente lento ou travar por
+falta de memória. Prefira modelos menores localmente e use `gemma4:cloud` (ou outro
+modelo `:cloud` do plano gratuito da Ollama) para qualidade melhor sem pesar na sua
+máquina.
 
 ## Como usar
 
@@ -122,66 +170,85 @@ fala durante uma gravação (aparece como `🎤 Detectado início de fala: [ID]`
 npm start
 ```
 
-Deixe esse terminal aberto durante toda a sessão de RPG.
-
 ### 2. Gravar a sessão
 
-No Discord, entre em um canal de voz e digite:
-
+No Discord, em um canal de voz:
 ```
 /sessao iniciar
 ```
-
-O bot entra no canal e começa a gravar. Cada trecho de fala de cada pessoa é salvo
-como um arquivo `.wav` separado, dentro de uma pasta nomeada com o timestamp da
-sessão em `src/output/`.
-
-Quando a sessão terminar:
-
+Joga normalmente. Ao final:
 ```
 /sessao parar
 ```
 
-O bot sai do canal e confirma onde os arquivos foram salvos.
+Cada trecho de fala de cada pessoa é salvo como um `.wav` separado, em
+`src/output/sessao-[timestamp]/`.
 
-### 3. Transcrever a sessão
+### 3. Transcrever e gerar a narrativa
 
 ```powershell
-npm run transcribe -- "src/output/sessao-2026-07-08T20-39-20-205Z"
+npm run transcribe -- "src/output/sessao-2026-07-12T17-12-51-165Z"
 ```
 
-(troque o caminho pelo nome real da pasta gerada no passo anterior)
+Isso executa o pipeline completo:
 
-Isso vai:
-1. Enviar cada `.wav` para a API da Groq (modelo `whisper-large-v3-turbo`)
-2. Filtrar trechos que o modelo classificou como silêncio/ruído/alucinação
-3. Agrupar falas consecutivas da mesma pessoa em um único parágrafo
-4. Aplicar os nomes definidos em `characters.json`
-5. Salvar tudo em `transcricao.md`, dentro da própria pasta da sessão, ordenado
-   cronologicamente
+1. **Fusão** — junta os `.wav` de cada pessoa em um único arquivo grande, com ~2s de
+   silêncio real inserido entre cada trecho original (evita que o Whisper misture
+   falas de momentos diferentes). Reaproveita a fusão se já tiver sido feita antes.
+2. **Compressão** — gera uma versão `.mp3` (16kHz, mono, 32kbps) de cada arquivo
+   fundido, para caber no limite de 25MB de upload da Groq (um `.wav` bruto de 1h
+   facilmente passa de 600MB).
+3. **Transcrição** — cada arquivo `.mp3` é enviado à Groq; se o rate limit persistir ou
+   o arquivo ainda for grande demais mesmo comprimido, cai automaticamente para o
+   Whisper local usando o `.wav` original.
+4. **Filtro de alucinação** — descarta segmentos identificados como silêncio, ruído, ou
+   frases genéricas conhecidas (`"Legenda por..."`, `"Obrigado."` isolado, etc.).
+5. **`transcricao.md`** — gerado com nomes de personagem, timestamps e falas agrupadas.
+6. **Narrativa** (se `narrative.enabled: true`) — condensa a transcrição em pedaços
+   menores, depois compõe tudo numa única narrativa contínua, salva em `narrativa.md`.
 
-O progresso é salvo incrementalmente — se a API cair no meio ou você precisar
-interromper, o `.md` gerado até aquele ponto não é perdido.
+O console mostra o tempo total de cada etapa ao final.
+
+### 4. Rodar só a narrativa (sem refazer a transcrição)
+
+```powershell
+npm run narrate -- "src/output/sessao-2026-07-12T17-12-51-165Z"
+```
+
+Útil para testar ajustes no prompt do `config.yaml` sem esperar a transcrição de novo.
 
 ## Estrutura de pastas
 
 ```
 discord-rpg-transcriber/
 ├─ src/
-│  ├─ index.js               # ponto de entrada do bot
-│  ├─ registerCommands.js    # registra os slash commands no Discord
-│  ├─ transcribe.js          # script de transcrição (roda separado do bot)
-│  ├─ characters.json        # mapeamento ID do Discord → nome do personagem
+│  ├─ index.js                    # ponto de entrada do bot
+│  ├─ registerCommands.js         # registra os slash commands
+│  ├─ config.js                   # carrega o config.yaml
+│  ├─ mergeAudio.js                # funde + comprime os .wav por pessoa
+│  ├─ transcribe.js                # orquestrador: merge → transcrição → narrativa
+│  ├─ narrate.js                   # lógica de condensação + composição da narrativa
+│  ├─ narrateOnly.js               # roda só a etapa de narrativa isoladamente
+│  ├─ characters.json              # mapeamento ID do Discord → nome do personagem
 │  ├─ commands/
-│  │  └─ sessao.js           # /sessao iniciar | parar
+│  │  └─ sessao.js                 # /sessao iniciar | parar
 │  ├─ voice/
-│  │  └─ recordAudio.js      # lógica de conexão e gravação por usuário
-│  └─ output/                 # sessões gravadas (ignorado pelo git)
+│  │  └─ recordAudio.js            # conexão de voz e gravação por usuário
+│  ├─ providers/
+│  │  ├─ transcribeGroq.js         # transcrição via Groq (arquivo fundido/mp3)
+│  │  ├─ transcribeLocal.js        # transcrição via Whisper local (arquivo fundido/wav)
+│  │  └─ transcribeFallback.js     # orquestra Groq → Whisper local
+│  └─ output/                      # sessões gravadas (ignorado pelo git)
 │     └─ sessao-.../
-│        ├─ [id]-[timestamp].wav   # um arquivo por trecho de fala
-│        └─ transcricao.md         # gerado após rodar npm run transcribe
-├─ .env
-├─ .env.example
+│        ├─ [id]-[timestamp].wav   # fragmentos originais, um por trecho de fala
+│        ├─ merged/
+│        │  ├─ [userId].wav        # áudio fundido, sem compressão (usado no fallback local)
+│        │  ├─ [userId].mp3        # áudio fundido, comprimido (usado no upload à Groq)
+│        │  └─ [userId].offsets.json  # mapa para reconstruir os timestamps reais
+│        ├─ transcricao.md
+│        └─ narrativa.md
+├─ config.yaml                     # provedores e prompts de cada etapa
+├─ .env / .env.example
 ├─ .gitignore
 ├─ package.json
 └─ README.md
@@ -189,90 +256,105 @@ discord-rpg-transcriber/
 
 ## Detalhes técnicos e decisões de design
 
-### Por que `.wav` e não `.ogg`?
+### Por que fundir os áudios antes de transcrever
 
-A primeira versão do projeto gravava em `.ogg` (container Ogg com stream Opus), que é
-o formato mais "nativo" para áudio do Discord. Isso gerou uma cadeia de problemas:
+A gravação corta um arquivo novo a cada ~1s de silêncio, o que gera centenas ou
+milhares de fragmentos minúsculos por sessão. Cada chamada de transcrição (Groq ou
+Whisper local) tem um custo fixo de processamento de alguns segundos, *independente do
+tamanho do áudio* — transcrever 3.500 fragmentos de menos de 1 segundo cada podia levar
+mais de 3 horas só de overhead. Fundindo os fragmentos de cada pessoa em um único
+arquivo grande antes de transcrever, esse custo fixo é pago uma única vez por pessoa,
+não uma vez por frase — reduzindo sessões de horas para minutos (uma sessão de teste
+caiu de ~4h para ~21 minutos com essa mudança).
 
-- A classe `OggLogicalBitstream` do `prism-media` exige uma versão alpha específica
-  do pacote (`2.0.0-alpha.0`), que não é a versão estável publicada
-- O cálculo de CRC do container Ogg depende do pacote `node-crc`, que na versão atual
-  publicada no npm é escrito em Rust e exige o toolchain do Cargo instalado — inviável
-  para a maioria dos setups
-- Desabilitar o CRC (`crc: false`) gera arquivos que tocam em players tolerantes (VLC)
-  mas são rejeitados por ferramentas mais rigorosas (`ffmpeg`, `ffprobe`), o que
-  também quebraria o envio para a API de transcrição
+Como efeito colateral positivo, arquivos maiores também dão mais contexto ao modelo de
+transcrição, melhorando o reconhecimento de nomes próprios e termos específicos da
+campanha.
 
-A solução foi decodificar o Opus para PCM (`prism.opus.Decoder`) e escrever
-diretamente como `.wav` usando o pacote `wav`, que não depende de container Ogg nem
-de checksum de página. Isso eliminou a cadeia de problemas por completo.
+### Por que existem dois formatos (.wav e .mp3) por pessoa
 
-### Por que DAVE (`@snazzah/davey`)?
+Um `.wav` sem compressão a 48kHz estéreo consome ~192KB por segundo — um áudio fundido
+de poucos minutos já ultrapassa o limite de 25MB de upload da API da Groq. A versão
+`.mp3` (16kHz, mono, 32kbps) é gerada especificamente para caber nesse limite mesmo em
+sessões longas, e é usada como primeira tentativa. Se mesmo comprimida a Groq rejeitar
+(sessões extremamente longas) ou o rate limit persistir, o `.wav` original é usado como
+entrada para o Whisper local, que não tem essa restrição de tamanho.
 
-A partir de março de 2026, a Discord passou a exigir o protocolo DAVE (criptografia
-ponta-a-ponta) em todos os canais de voz. Sem o pacote `@snazzah/davey` instalado, a
-conexão de voz nunca sai do estado `Connecting`/`Signalling` e nunca chega a `Ready`.
+### Por que `.wav` (e não `.ogg`) na gravação original
 
-Vale notar que, na época em que este projeto foi desenvolvido, havia relatos de bugs
-conhecidos no suporte a DAVE do `@discordjs/voice` (principalmente relacionados à
-recepção de áudio de participantes usando clientes desatualizados, que enviam áudio
-sem a criptografia esperada e podem ter seus pacotes descartados). Se em algum
-momento uma pessoa específica não estiver sendo gravada, o primeiro passo é confirmar
-se o cliente Discord dela está atualizado.
+A gravação usa `.wav` em vez do container Ogg nativo do Discord porque a classe
+`OggLogicalBitstream` do `prism-media` depende de um pacote de cálculo de checksum
+(`node-crc`) cuja versão publicada atual exige compilação em Rust — inviável na maioria
+dos setups Windows. Decodificar o Opus para PCM e escrever direto como `.wav` evitou
+essa cadeia de dependências problemáticas.
 
-### Por que o Node.js precisa de exceção no Firewall do Windows
+### Por que DAVE (`@snazzah/davey`)
 
-O tráfego de voz do Discord usa UDP (diferente da sinalização, que usa WebSocket).
-Se o Firewall do Windows não tiver uma regra explícita permitindo o `node.exe` em
-redes **Privadas** (não só Públicas), a conexão de voz fica presa alternando entre
-`Signalling` e `Connecting` indefinidamente, sem nunca reportar um erro claro.
+Desde março de 2026 a Discord exige o protocolo DAVE (criptografia ponta-a-ponta) em
+canais de voz. Sem esse pacote, a conexão nunca sai do estado `Connecting`/`Signalling`.
+Se uma pessoa específica não for gravada (áudio mudo/vazio), o primeiro passo é
+confirmar se o cliente Discord dela está atualizado — clientes desatualizados podem
+enviar áudio sem a criptografia esperada, sendo descartados silenciosamente.
+
+### Firewall do Windows
+
+O tráfego de voz do Discord usa UDP. Sem uma regra explícita permitindo o `node.exe` em
+redes **Privadas** (não só Públicas) no Firewall do Windows, a conexão de voz fica presa
+alternando entre `Signalling` e `Connecting` indefinidamente.
 
 ### Filtro de alucinações do Whisper
 
-Modelos Whisper tendem a "inventar" texto quando o áudio é silêncio, ruído de fundo,
-ou som de fundo sem fala (jogos, música). O filtro combina três sinais retornados
-pela API em modo `verbose_json`:
+Tanto a Groq (via `no_speech_prob`, `avg_logprob`, `compression_ratio`) quanto o Whisper
+local (via filtro de padrões de texto e remoção de marcações como `[MÚSICA]`) descartam
+trechos identificados como silêncio, ruído de fundo, ou frases genéricas que o modelo
+"inventa" quando não há fala real (`"Legenda por..."`, `"Obrigado."` isolado, etc.).
 
-- `no_speech_prob` alto → provavelmente não há fala no trecho
-- `avg_logprob` muito baixo → o modelo teve pouca confiança no texto gerado
-- `compression_ratio` alto → texto repetitivo ou sem sentido
+Um risco conhecido do Whisper local em áudios longos: o modelo usa o texto recém-gerado
+como contexto para continuar a transcrição, e se ele errar e repetir uma frase, esse
+erro se autorreforça, causando um loop de repetição até o fim do áudio. A compressão
+para `.mp3` (que mantém a maioria das transcrições na Groq, menos suscetível a esse
+comportamento) reduz bastante a exposição a esse problema.
 
-Além disso, há uma lista de expressões regulares para descartar frases clássicas de
-alucinação (ex: "Legenda por...", "Obrigado." isolado, etc.), que aparecem com
-frequência em transcrições de trechos sem fala real.
+### Fallback em cascata
 
-### Rate limit da API da Groq
+Tanto a transcrição quanto a narrativa tentam a Groq primeiro (rápida, mas com cota
+limitada) e caem automaticamente para alternativas locais/gratuitas quando o rate limit
+é atingido — sem travar o processo nem exigir intervenção manual:
 
-O tier gratuito da Groq permite 20 requisições por minuto para o Whisper. O script de
-transcrição:
+```
+Transcrição:  Groq (mp3)  →  Whisper local (wav)
 
-- Espera ~3.1 segundos entre cada requisição, para não estourar o limite na maioria
-  dos casos
-- Se mesmo assim receber um erro `429`, lê o tempo de espera sugerido na própria
-  mensagem de erro da API e tenta de novo automaticamente
-- Salva o `.md` após cada arquivo processado, não apenas no final — então mesmo que o
-  processo seja interrompido, o progresso não é perdido
+Narrativa:    Groq  →  Ollama Cloud (gemma4:cloud)  →  Ollama local (llama3.1)
+```
+
+Esperas curtas de rate limit (menos de 30s) são absorvidas com retry automático; esperas
+longas (rate limit diário) fazem o processo cair direto para o próximo nível, em vez de
+ficar parado esperando.
+
+### Narrativa em duas etapas (map-reduce)
+
+Uma transcrição de sessão inteira não cabe no contexto de uma única chamada de LLM.
+A geração da narrativa funciona em duas etapas:
+
+1. **Condensar**: cada pedaço da transcrição bruta (~6.000 caracteres) é resumido
+   isoladamente em tópicos enxutos, sem mecânica de jogo.
+2. **Compor**: todos os resumos são enviados juntos numa única chamada final, que
+   escreve a narrativa completa com início, meio e fim — porque só nessa etapa o modelo
+   tem visão da sessão inteira de uma vez, evitando repetições que apareceriam se cada
+   pedaço fosse narrado isoladamente.
 
 ## Solução de problemas
 
 | Sintoma | Causa provável | Solução |
 |---|---|---|
-| `Missing Access` ao rodar `npm run register` | Bot convidado sem o escopo `applications.commands` | Gerar novo link de convite com esse escopo marcado e reconvidar o bot |
-| `/sessao` não aparece no Discord | Comando registrado num servidor diferente do que você está testando | Confirmar que `GUILD_ID` corresponde ao servidor certo |
+| `Missing Access` ao rodar `npm run register` | Bot convidado sem o escopo `applications.commands` | Gerar novo link de convite com esse escopo e reconvidar o bot |
+| `/sessao` não aparece no Discord | Comando registrado num servidor diferente do testado | Confirmar que `GUILD_ID` corresponde ao servidor certo |
 | Conexão de voz presa em `Signalling ↔ Connecting` | Firewall do Windows bloqueando UDP na rede Privada | Adicionar `node.exe` às exceções do Firewall para redes Privada e Pública |
-| `.wav` gravado mas mudo/vazio para uma pessoa específica | Cliente Discord desatualizado dessa pessoa, causando falha de decriptação DAVE | Pedir para atualizar o app/cliente do Discord |
-| Transcrição cheia de frases genéricas tipo "Obrigado" ou "Legenda por..." | Alucinação do Whisper em trechos de silêncio/ruído | Já mitigado pelo filtro combinado em `transcribe.js`; ajustar os limites (`NO_SPEECH_THRESHOLD`, etc.) se persistir |
-| Erro `429` durante a transcrição | Rate limit da Groq atingido | O script já faz retry automático; se persistir, considerar aumentar o delay entre requisições |
-| Nome do personagem não aparece na transcrição (mostra `Usuário [ID]`) | ID não cadastrado em `characters.json`, ou arquivo com nome/local errado | Confirmar que o arquivo se chama exatamente `characters.json` e está em `src/`, com o ID como chave exata |
+| `.wav` gravado mas mudo/vazio para uma pessoa específica | Cliente Discord desatualizado, falha de decriptação DAVE | Pedir para atualizar o app do Discord |
+| Erro `413 Payload Too Large` na transcrição | Arquivo `.mp3` ainda excede 25MB (sessão extremamente longa) | O fallback já cai para o Whisper local automaticamente; não requer ação manual |
+| Transcrição local presa repetindo a mesma frase | Bug de auto-condicionamento do Whisper em áudios longos | Mitigado pela compressão para `.mp3` (mantém mais transcrições na Groq); se persistir, considerar dividir o `.wav` em sub-blocos menores antes do Whisper local |
+| Erro `429` na Groq | Rate limit (por minuto ou diário) | O fallback já lida automaticamente; se aparecer só no console sem interromper o processo, é esperado |
+| Nome do personagem não aparece (`Usuário [ID]`) | ID não cadastrado em `characters.json` | Confirmar nome exato do arquivo (`characters.json`, em `src/`) e que a chave bate com o ID exato |
+| `Cannot find module 'node-crc'` | Configuração antiga de gravação em `.ogg` | Já resolvido na versão atual (gravação em `.wav`); não deveria mais ocorrer |
 
-## Próximos passos
-
-1. **`/sessao resumo`**: gerar um resumo automático da sessão a partir da
-   `transcricao.md`, usando a API da Groq ou Anthropic
-2. **Detecção automática de personagens novos**: ao encontrar um `userId` sem entrada
-   em `characters.json`, perguntar o nome via mensagem no Discord em vez de exigir
-   edição manual do arquivo
-3. **Processamento pós-transcrição com LLM**: limpar hesitações e reorganizar a fala
-   em prosa narrativa mais próxima de um livro
-4. **Migração para transcrição local** (`faster-whisper` ou `whisper.cpp`), caso o
-   rate limit da API gratuita se torne um limitador real em sessões muito longas
+## Under Construct 👷

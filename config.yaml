@@ -1,0 +1,56 @@
+transcription:
+  provider: 'fallback'
+  groq:
+    model: 'whisper-large-v3-turbo'
+  local:
+    model: 'small'
+
+narrative:
+  provider: 'fallback'
+  groq:
+    model: 'llama-3.1-8b-instant'
+  ollama_cloud:
+    base_url: 'http://localhost:11434/v1'
+    model: 'gemma4:cloud'
+  ollama:
+    base_url: 'http://localhost:11434/v1'
+    model: 'llama3.1'
+
+  # Etapa 1: condensa cada pedaço da transcrição bruta em uma lista enxuta
+  # dos acontecimentos principais, sem prosa longa ainda.
+  condense_prompt: |
+    Você vai receber um trecho da transcrição bruta de uma sessão de RPG de mesa.
+    Extraia APENAS os acontecimentos narrativos relevantes deste trecho, em português
+    brasileiro, de forma bem concisa (como uma lista de eventos em prosa curta, não uma
+    narrativa elaborada). Ignore completamente rolagens de dados, valores numéricos,
+    testes, bônus, dano, pontos de vida, iniciativa, nomes de habilidades/magias citados
+    como regra, comentários fora de personagem, piadas, problemas técnicos e qualquer
+    conversa administrativa. Mantenha nomes de personagens, decisões importantes,
+    diálogos relevantes (resumidos, não literais) e consequências das ações. Não repita
+    informações. Não invente nada que não esteja no texto. Responda apenas com o resumo
+    dos eventos, sem introduções como "aqui está o resumo".
+
+  # Etapa 2: recebe todos os resumos condensados juntos e escreve a narrativa final,
+  # com visão completa da sessão inteira, garantindo início, meio e fim reais.
+  final_prompt: |
+    Você vai receber uma sequência de resumos condensados de acontecimentos de uma
+    sessão de RPG de mesa, em ordem cronológica. Reescreva isso como um único capítulo
+    de romance de fantasia medieval, produzindo uma narrativa resumida da sessão com
+    início, desenvolvimento e conclusão claros. O objetivo não é preservar a estrutura
+    dos resumos, mas transformar os acontecimentos em uma narrativa fluida, contínua e
+    agradável de ler, com ritmo de livro.
+
+    Priorize os eventos mais importantes, o desenvolvimento dos personagens, os
+    conflitos, as descobertas e as consequências das ações. Não repita acontecimentos
+    já narrados — se o mesmo evento aparecer mais de uma vez nos resumos, consolide-o em
+    uma única passagem coerente. Resuma combates longos, destacando apenas momentos
+    decisivos e desfechos, sem narrar cada golpe.
+
+    Escreva exclusivamente em português brasileiro, sem nenhuma palavra, expressão ou
+    conectivo em inglês. Substitua qualquer termo em inglês que não faça parte do
+    universo da campanha por uma expressão equivalente em português.
+
+    Não invente acontecimentos, personagens, diálogos ou locais que não estejam
+    presentes nos resumos fornecidos. Quando houver lacunas entre eventos, conecte-os de
+    forma natural, sem criar conteúdo novo. O resultado final deve parecer um capítulo
+    de romance, não um relatório de sessão.
