@@ -1,9 +1,10 @@
 import { readdirSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import ffmpegPath from 'ffmpeg-static';
 
 const SILENCE_GAP_SECONDS = 2;
+const SILENCE_VOLUME_THRESHOLD_DB = -40; // fragmentos com pico abaixo disso são descartados
 
 function parseFilename(filename) {
   const match = filename.match(/^(\d+)-(\d+)\.wav$/);
@@ -37,35 +38,44 @@ function generateSilenceFile(outputPath, seconds) {
 }
 
 /**
- * Gera uma versão comprimida (MP3, 16kHz mono, 32kbps) do arquivo fundido,
- * especificamente para caber no limite de 25MB da Groq. O Whisper já
- * trabalha internamente em 16kHz mono, então essa compressão não perde
- * qualidade relevante para transcrição de voz.
+ * Mede o pico de volume de um arquivo de áudio. Retorna true se o fragmento
+ * for essencialmente silêncio/ruído de fundo (pico abaixo do limiar), caso
+ * em que não vale a pena incluí-lo na fusão nem transcrevê-lo.
+ *
+ * Usa spawnSync (em vez de execFileSync) porque o filtro volumedetect escreve
+ * as estatísticas no stderr mesmo quando o ffmpeg termina com sucesso.
  */
-function compressForUpload(wavPath, mp3Path) {
-  execFileSync(ffmpegPath, [
-    '-y',
-    '-i', wavPath,
-    '-ar', '16000',
-    '-ac', '1',
-    '-b:a', '32k',
-    '-codec:a', 'libmp3lame',
-    mp3Path,
+function isMostlySilence(filePath, thresholdDb = SILENCE_VOLUME_THRESHOLD_DB) {
+  const result = spawnSync(ffmpegPath, [
+    '-i', filePath,
+    '-af', 'volumedetect',
+    '-f', 'null',
+    '-',
   ]);
+
+  const stderr = result.stderr?.toString() ?? '';
+  const match = stderr.match(/max_volume:\s*(-?[\d.]+)\s*dB/);
+
+  if (!match) return false; // não conseguiu medir - por segurança, mantém o fragmento
+
+  const maxVolume = parseFloat(match[1]);
+  return maxVolume < thresholdDb;
 }
 
 /**
  * Funde todos os .wav de cada pessoa em um único arquivo grande por pessoa,
- * inserindo silêncio real entre trechos originais para evitar que o Whisper
- * misture falas de momentos diferentes.
+ * descartando antes fragmentos que são essencialmente silêncio/ruído de fundo
+ * (evita alimentar o Whisper com trechos longos sem fala real, que podem
+ * disparar loops de repetição, principalmente no Whisper local).
+ *
+ * Insere ~2s de silêncio real entre os trechos restantes, para evitar que o
+ * Whisper misture falas de momentos diferentes.
  *
  * Gera duas versões de cada fusão:
  * - .wav (sem compressão): usado como entrada para o Whisper local
- * - .mp3 (comprimido, 32kbps mono 16kHz): usado para upload na Groq,
- *   já que WAV bruto estoura o limite de 25MB da API em poucos minutos
+ * - .mp3 (comprimido, 32kbps mono 16kHz): usado para upload na Groq
  *
- * Se a pasta merged/ já existir com os arquivos de um usuário (de uma
- * execução anterior), reaproveita em vez de refazer o merge do zero.
+ * Reaproveita a fusão existente de uma execução anterior, se já tiver sido feita.
  *
  * Retorna: { userId: { wavPath, mp3Path, offsets } }
  */
@@ -113,8 +123,27 @@ export function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) 
   generateSilenceFile(silencePath, SILENCE_GAP_SECONDS);
 
   for (const userId of userIdsToMerge) {
-    const chunks = byUser[userId];
-    console.log(`🔗 Fundindo ${chunks.length} arquivo(s) de ${userId}...`);
+    const allChunks = byUser[userId];
+    console.log(`🔎 Analisando ${allChunks.length} arquivo(s) de ${userId} (filtrando silêncio/ruído)...`);
+
+    const chunks = [];
+    let skippedCount = 0;
+
+    for (const chunk of allChunks) {
+      const chunkPath = resolve(join(sessionFolder, chunk.filename));
+      if (isMostlySilence(chunkPath)) {
+        skippedCount++;
+        continue;
+      }
+      chunks.push(chunk);
+    }
+
+    console.log(`🔗 Fundindo ${chunks.length} arquivo(s) de ${userId} (${skippedCount} descartado(s) como silêncio/ruído)...`);
+
+    if (chunks.length === 0) {
+      console.log(`⚠️ ${userId}: nenhum fragmento com fala real encontrado, pulando.`);
+      continue;
+    }
 
     const concatListPath = join(mergedFolder, `${userId}-list.txt`);
     const wavPath = join(mergedFolder, `${userId}.wav`);
@@ -149,7 +178,15 @@ export function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) 
     ]);
 
     console.log(`🗜️ Comprimindo ${userId} para upload...`);
-    compressForUpload(wavPath, mp3Path);
+    execFileSync(ffmpegPath, [
+      '-y',
+      '-i', wavPath,
+      '-ar', '16000',
+      '-ac', '1',
+      '-b:a', '32k',
+      '-codec:a', 'libmp3lame',
+      mp3Path,
+    ]);
 
     writeFileSync(join(mergedFolder, `${userId}.offsets.json`), JSON.stringify(offsets, null, 2), 'utf-8');
 

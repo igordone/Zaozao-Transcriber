@@ -1,10 +1,12 @@
 import { joinVoiceChannel, EndBehaviorType, VoiceConnectionStatus, entersState } from '@discordjs/voice';
 import prism from 'prism-media';
 import wav from 'wav';
-import { mkdirSync, existsSync } from 'fs';
+import { createWriteStream, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { Transform } from 'stream';
 
+
+const RESUMABLE_WINDOW_MS = 3 * 60 * 60 * 1000; // 3 horas
 const activeSessions = new Map();
 
 // Filtra pacotes Opus pequenos demais, que o prism-media não consegue processar
@@ -22,15 +24,18 @@ function createSafeOpusFilter() {
   });
 }
 
-export function startRecording(voiceChannel) {
+export function startRecording(options = {}, voiceChannel) {
   const guildId = voiceChannel.guild.id;
 
-  const sessionFolder = join(
-    process.cwd(),
-    'src',
-    'output',
-    `sessao-${new Date().toISOString().replace(/[:.]/g, '-')}`
-  );
+  const sessionFolder = options.existingFolder
+    ? options.existingFolder
+    : join(
+        process.cwd(),
+        'src',
+        'output',
+        `sessao-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      );
+
   if (!existsSync(sessionFolder)) mkdirSync(sessionFolder, { recursive: true });
 
   const connection = joinVoiceChannel({
@@ -119,4 +124,35 @@ export function stopRecording(guildId) {
 
 export function isRecording(guildId) {
   return activeSessions.has(guildId);
+}
+
+export function findResumableSession() {
+  const outputDir = join(process.cwd(), 'src', 'output');
+  if (!existsSync(outputDir)) return null;
+
+  const folders = readdirSync(outputDir)
+    .filter((name) => name.startsWith('sessao-'))
+    .map((name) => {
+      const match = name.match(/^sessao-(.+)Z$/);
+      if (!match) return null;
+      const isoLike = match[1].replace(
+        /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})$/,
+        '$1-$2-$3T$4:$5:$6.$7'
+      );
+      const timestamp = new Date(isoLike + 'Z').getTime();
+      return { name, timestamp, fullPath: join(outputDir, name) };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.timestamp - a.timestamp);
+
+  if (folders.length === 0) return null;
+
+  const mostRecent = folders[0];
+  const age = Date.now() - mostRecent.timestamp;
+
+  if (age < RESUMABLE_WINDOW_MS) {
+    return mostRecent;
+  }
+
+  return null;
 }

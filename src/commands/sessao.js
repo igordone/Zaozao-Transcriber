@@ -1,5 +1,5 @@
-import { SlashCommandBuilder } from 'discord.js';
-import { startRecording, stopRecording, isRecording } from '../voice/recordAudio.js';
+import { SlashCommandBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { startRecording, stopRecording, isRecording, findResumableSession } from '../voice/recordAudio.js';
 
 export default {
   data: new SlashCommandBuilder()
@@ -34,7 +34,69 @@ export default {
         });
       }
 
-      const folder = startRecording(voiceChannel);
+      const resumable = findResumableSession();
+
+      if (resumable) {
+        const ageMinutes = Math.round((Date.now() - resumable.timestamp) / 60000);
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId('sessao_continuar')
+            .setLabel('▶️ Continuar sessão anterior')
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId('sessao_nova')
+            .setLabel('🆕 Nova sessão')
+            .setStyle(ButtonStyle.Secondary)
+        );
+
+        const response = await interaction.reply({
+          content: `Encontrei uma sessão de **${ageMinutes} minuto(s) atrás**. Isso foi uma pausa, ou você quer começar uma sessão nova?`,
+          components: [row],
+          withResponse: true,
+        });
+
+        const collector = response.resource.message.createMessageComponentCollector({
+          time: 30_000,
+          max: 1,
+        });
+
+        collector.on('collect', async (buttonInteraction) => {
+          if (buttonInteraction.user.id !== interaction.user.id) {
+            return buttonInteraction.reply({
+              content: '⚠️ Só quem iniciou o comando pode responder.',
+              ephemeral: true,
+            });
+          }
+
+          const useExisting = buttonInteraction.customId === 'sessao_continuar';
+          const folder = startRecording(voiceChannel, {
+            existingFolder: useExisting ? resumable.fullPath : null,
+          });
+
+          await buttonInteraction.update({
+            content: useExisting
+              ? `🔴 Continuando a gravação em **${voiceChannel.name}**.\nUsando a pasta: \`${folder}\``
+              : `🔴 Nova gravação iniciada em **${voiceChannel.name}**.\nArquivos serão salvos em: \`${folder}\``,
+            components: [],
+          });
+        });
+
+        collector.on('end', (collected) => {
+          if (collected.size === 0) {
+            // Ninguém respondeu a tempo - assume nova sessão por segurança
+            const folder = startRecording(voiceChannel, {});
+            interaction.editReply({
+              content: `⏱️ Sem resposta - iniciando **nova sessão** por padrão em **${voiceChannel.name}**.\nArquivos serão salvos em: \`${folder}\``,
+              components: [],
+            });
+          }
+        });
+
+        return;
+      }
+
+      const folder = startRecording(voiceChannel, {});
       return interaction.reply(
         `🔴 Gravação iniciada em **${voiceChannel.name}**.\nArquivos serão salvos em: \`${folder}\``
       );

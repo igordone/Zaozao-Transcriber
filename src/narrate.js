@@ -1,4 +1,5 @@
 const CHUNK_SIZE_CHARS = 6000;
+let groqCooldownUntil = 0;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,6 +56,10 @@ function removeDuplicateLines(text) {
 async function tryGroqChat(systemPrompt, userContent, config, attempt = 1) {
   const MAX_QUICK_ATTEMPTS = 2; // tentativas curtas antes de desistir e cair no local
 
+  if (Date.now() < groqCooldownUntil) {
+    throw new Error('GROQ_RATE_LIMITED');
+  }
+
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -75,21 +80,22 @@ async function tryGroqChat(systemPrompt, userContent, config, attempt = 1) {
 
   if (response.status === 429) {
     const errorText = await response.text();
-
-    if (attempt >= MAX_QUICK_ATTEMPTS) {
-      throw new Error('GROQ_RATE_LIMITED'); // sinal específico pro caller decidir usar fallback
-    }
-
     const delay = parseRetryDelay(errorText);
-    // Só vale esperar automaticamente se for uma espera curta (< 30s).
-    // Esperas longas (rate limit diário) não compensam - cai direto pro local.
-    if (delay > 30000) {
+
+    if (attempt >= MAX_QUICK_ATTEMPTS || delay > 30000) {
+      // Marca cooldown pelo tempo sugerido pela API (ou 60s como padrão seguro)
+      groqCooldownUntil = Date.now() + Math.min(delay, 120000);
       throw new Error('GROQ_RATE_LIMITED');
     }
 
-    console.log(`⏳ Groq rate limit curto. Aguardando ${(delay / 1000).toFixed(1)}s...`);
+    console.log(`⏳ Rate limit. Aguardando ${(delay / 1000).toFixed(1)}s...`);
     await sleep(delay);
     return tryGroqChat(systemPrompt, userContent, config, attempt + 1);
+  }
+
+  if (response.status === 413) {
+    console.log('⚠️ Requisição grande demais para a Groq neste modelo — caindo para o próximo nível...');
+    throw new Error('GROQ_RATE_LIMITED'); // reaproveita o mesmo sinal de fallback
   }
 
   if (!response.ok) throw new Error(`Groq retornou ${response.status}: ${await response.text()}`);
