@@ -8,6 +8,7 @@ import { Transform } from 'stream';
 
 const RESUMABLE_WINDOW_MS = 3 * 60 * 60 * 1000; // 3 horas
 const activeSessions = new Map();
+const pausedGuilds = new Set();
 
 // Filtra pacotes Opus pequenos demais, que o prism-media não consegue processar
 // sem quebrar (bug conhecido: https://github.com/amishshah/prism-media/issues/104)
@@ -24,7 +25,7 @@ function createSafeOpusFilter() {
   });
 }
 
-export function startRecording(options = {}, voiceChannel) {
+export function startRecording(voiceChannel, options = {}) {
   const guildId = voiceChannel.guild.id;
 
   const sessionFolder = options.existingFolder
@@ -72,6 +73,8 @@ export function startRecording(options = {}, voiceChannel) {
   console.log('👂 Escutando eventos de fala...');
 
   receiver.speaking.on('start', (userId) => {
+    if (pausedGuilds.has(guildId)) return; // gravação pausada - ignora completamente
+
     if (userStreams.has(userId)) return;
     console.log(`🎤 Detectado início de fala: ${userId}`);
 
@@ -119,11 +122,28 @@ export function stopRecording(guildId) {
   if (!session) return null;
   session.connection.destroy();
   activeSessions.delete(guildId);
+  pausedGuilds.delete(guildId);
   return session.sessionFolder;
 }
 
 export function isRecording(guildId) {
   return activeSessions.has(guildId);
+}
+
+/**
+ * Pausa a gravação sem desconectar do canal de voz: o bot continua presente,
+ * mas ignora qualquer fala detectada até ser retomada.
+ */
+export function pauseRecording(guildId) {
+  pausedGuilds.add(guildId);
+}
+
+export function resumeRecording(guildId) {
+  pausedGuilds.delete(guildId);
+}
+
+export function isPaused(guildId) {
+  return pausedGuilds.has(guildId);
 }
 
 export function findResumableSession() {

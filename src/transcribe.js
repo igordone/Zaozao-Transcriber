@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, basename } from 'path';
 
 import { loadConfig } from './config.js';
@@ -73,7 +73,7 @@ function buildMarkdown(entries, characterMap, sessionFolder) {
   return `# Sessão de RPG — ${basename(sessionFolder)}\n\n---\n\n` + lines.join('\n\n');
 }
 
-export async function transcribeMergedSession(sessionFolder) {
+export async function transcribeAudio(sessionFolder, onProgress) {
   const startTime = Date.now();
   console.log(`⏱️ Transcrição (modo fundido) iniciada em: ${new Date(startTime).toLocaleString('pt-BR')}`);
 
@@ -81,7 +81,7 @@ export async function transcribeMergedSession(sessionFolder) {
   const characterMap = loadCharacterMap();
 
   console.log('🔗 Fundindo áudios por pessoa...');
-  const merged = mergeSessionAudio(sessionFolder);
+  const merged = await mergeSessionAudio(sessionFolder);
 
   const transcribeFn =
     config.transcription.provider === 'local' ? (paths, cfg) => transcribeMergedWithLocalWhisper(paths.wavPath, cfg) :
@@ -91,10 +91,18 @@ export async function transcribeMergedSession(sessionFolder) {
   const entries = [];
   const outputPath = join(sessionFolder, 'transcricao.md');
   const userIds = Object.keys(merged);
+  const totalUsers = userIds.length;
 
   for (const [index, userId] of userIds.entries()) {
     const { wavPath, mp3Path, offsets } = merged[userId];
-    console.log(`🎧 [${index + 1}/${userIds.length}] Transcrevendo ${userId}...`);
+    console.log(`🎧 [${index + 1}/${totalUsers}] Transcrevendo ${userId}...`);
+
+    if (onProgress) onProgress({
+      phase: 'transcribing',
+      current: index + 1,
+      total: totalUsers,
+      message: `Transcrevendo ${userId} (${index + 1}/${totalUsers})...`,
+    });
 
     try {
       const segments = await transcribeFn({ wavPath, mp3Path }, config.transcription);
@@ -112,25 +120,57 @@ export async function transcribeMergedSession(sessionFolder) {
   }
 
   console.log(`\n📄 Transcrição salva em: ${outputPath}`);
+  console.log(`⏱️ Tempo total de transcrição: ${((Date.now() - startTime) / 1000 / 60).toFixed(1)} minutos\n`);
 
-  const endTime = Date.now();
-  console.log(`⏱️ Tempo total de transcrição: ${((endTime - startTime) / 1000 / 60).toFixed(1)} minutos\n`);
+  if (onProgress) onProgress({ phase: 'done', message: 'Transcrição concluída!' });
+  return outputPath;
+}
 
-  if (config.narrative.enabled) {
-    const narrativeStart = Date.now();
-    console.log(`✨ Gerando versão narrativa (provedor: ${config.narrative.provider})...`);
+export async function generateSessionNarrative(sessionFolder, onProgress) {
+  const config = loadConfig();
+  const outputPath = join(sessionFolder, 'transcricao.md');
 
-    const rawMarkdown = readFileSync(outputPath, 'utf-8');
-    const narrativePath = join(sessionFolder, 'narrativa.md');
-
-    const narrative = await generateNarrative(rawMarkdown, config.narrative, (partial) => {
-      writeFileSync(narrativePath, partial, 'utf-8');
-    });
-
-    writeFileSync(narrativePath, narrative, 'utf-8');
-    console.log(`📖 Narrativa salva em: ${narrativePath}`);
-    console.log(`⏱️ Tempo total de narrativa: ${((Date.now() - narrativeStart) / 1000 / 60).toFixed(1)} minutos`);
+  if (!existsSync(outputPath)) {
+    throw new Error('Transcrição não encontrada. Transcreva os áudios primeiro.');
   }
+
+  if (!config.narrative || !config.narrative.provider) {
+    throw new Error('Narrativa desabilitada ou sem provedor na configuração (config.yaml).');
+  }
+
+  const narrativeStart = Date.now();
+  console.log(`✨ Gerando versão narrativa (provedor: ${config.narrative.provider})...`);
+
+  if (onProgress) onProgress({
+    phase: 'condensing',
+    current: 0,
+    total: 0,
+    message: 'Iniciando condensação da narrativa...',
+  });
+
+  const rawMarkdown = readFileSync(outputPath, 'utf-8');
+  const narrativePath = join(sessionFolder, 'narrativa.md');
+
+  const narrative = await generateNarrative(rawMarkdown, config.narrative, (partial) => {
+    writeFileSync(narrativePath, partial, 'utf-8');
+    if (onProgress) onProgress({
+      phase: 'condensing',
+      message: 'Condensando pedaços da transcrição...',
+      partial: true,
+    });
+  });
+
+  writeFileSync(narrativePath, narrative, 'utf-8');
+  console.log(`📖 Narrativa salva em: ${narrativePath}`);
+  console.log(`⏱️ Tempo total de narrativa: ${((Date.now() - narrativeStart) / 1000 / 60).toFixed(1)} minutos`);
+
+  if (onProgress) onProgress({ phase: 'done', message: 'Narrativa concluída!' });
+  return narrativePath;
+}
+
+export async function transcribeMergedSession(sessionFolder) {
+  await transcribeAudio(sessionFolder);
+  await generateSessionNarrative(sessionFolder);
 }
 
 if (process.argv[1] && process.argv[1].endsWith('transcribe.js')) {

@@ -1,10 +1,10 @@
-import { readdirSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
+import { readdirSync, writeFileSync, mkdirSync, existsSync, readFileSync, unlinkSync } from 'fs';
 import { join, resolve } from 'path';
-import { execFileSync, spawnSync } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import ffmpegPath from 'ffmpeg-static';
 
 const SILENCE_GAP_SECONDS = 2;
-const SILENCE_VOLUME_THRESHOLD_DB = -40; // fragmentos com pico abaixo disso são descartados
+const SILENCE_VOLUME_THRESHOLD_DB = -40;
 
 function parseFilename(filename) {
   const match = filename.match(/^(\d+)-(\d+)\.wav$/);
@@ -12,9 +12,34 @@ function parseFilename(filename) {
   return { userId: match[1], timestamp: Number(match[2]) };
 }
 
-function getDurationSecondsReliable(filePath) {
+function execFileAsync(args) {
+  return new Promise((res, rej) => {
+    const proc = execFile(ffmpegPath, args, (err, stdout, stderr) => {
+      if (err) rej(Object.assign(err, { stderr }));
+      else res({ stdout, stderr });
+    });
+    proc.stdout?.resume();
+    proc.stderr?.resume();
+  });
+}
+
+function spawnAsync(args) {
+  return new Promise((res, rej) => {
+    const proc = spawn(ffmpegPath, args);
+    let stderr = '';
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stdout.resume();
+    proc.on('close', (code) => {
+      if (code === 0) res({ stderr });
+      else rej(Object.assign(new Error(`ffmpeg exited with code ${code}`), { stderr }));
+    });
+    proc.on('error', rej);
+  });
+}
+
+async function getDurationSecondsReliable(filePath) {
   try {
-    execFileSync(ffmpegPath, ['-i', filePath], { stdio: ['ignore', 'ignore', 'pipe'] });
+    await execFileAsync(['-i', filePath]);
   } catch (err) {
     const stderr = err.stderr?.toString() ?? '';
     const match = stderr.match(/Duration:\s*(\d+):(\d+):([\d.]+)/);
@@ -27,7 +52,7 @@ function getDurationSecondsReliable(filePath) {
 }
 
 function generateSilenceFile(outputPath, seconds) {
-  execFileSync(ffmpegPath, [
+  return execFileAsync([
     '-y',
     '-f', 'lavfi',
     '-i', `anullsrc=channel_layout=stereo:sample_rate=48000`,
@@ -37,16 +62,8 @@ function generateSilenceFile(outputPath, seconds) {
   ]);
 }
 
-/**
- * Mede o pico de volume de um arquivo de áudio. Retorna true se o fragmento
- * for essencialmente silêncio/ruído de fundo (pico abaixo do limiar), caso
- * em que não vale a pena incluí-lo na fusão nem transcrevê-lo.
- *
- * Usa spawnSync (em vez de execFileSync) porque o filtro volumedetect escreve
- * as estatísticas no stderr mesmo quando o ffmpeg termina com sucesso.
- */
-function isMostlySilence(filePath, thresholdDb = SILENCE_VOLUME_THRESHOLD_DB) {
-  const result = spawnSync(ffmpegPath, [
+async function isMostlySilence(filePath, thresholdDb = SILENCE_VOLUME_THRESHOLD_DB) {
+  const result = await spawnAsync([
     '-i', filePath,
     '-af', 'volumedetect',
     '-f', 'null',
@@ -56,30 +73,13 @@ function isMostlySilence(filePath, thresholdDb = SILENCE_VOLUME_THRESHOLD_DB) {
   const stderr = result.stderr?.toString() ?? '';
   const match = stderr.match(/max_volume:\s*(-?[\d.]+)\s*dB/);
 
-  if (!match) return false; // não conseguiu medir - por segurança, mantém o fragmento
+  if (!match) return false;
 
   const maxVolume = parseFloat(match[1]);
   return maxVolume < thresholdDb;
 }
 
-/**
- * Funde todos os .wav de cada pessoa em um único arquivo grande por pessoa,
- * descartando antes fragmentos que são essencialmente silêncio/ruído de fundo
- * (evita alimentar o Whisper com trechos longos sem fala real, que podem
- * disparar loops de repetição, principalmente no Whisper local).
- *
- * Insere ~2s de silêncio real entre os trechos restantes, para evitar que o
- * Whisper misture falas de momentos diferentes.
- *
- * Gera duas versões de cada fusão:
- * - .wav (sem compressão): usado como entrada para o Whisper local
- * - .mp3 (comprimido, 32kbps mono 16kHz): usado para upload na Groq
- *
- * Reaproveita a fusão existente de uma execução anterior, se já tiver sido feita.
- *
- * Retorna: { userId: { wavPath, mp3Path, offsets } }
- */
-export function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) {
+export async function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) {
   const files = readdirSync(sessionFolder).filter((f) => f.endsWith('.wav'));
   const byUser = {};
 
@@ -104,8 +104,11 @@ export function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) 
     const wavPath = join(mergedFolder, `${userId}.wav`);
     const mp3Path = join(mergedFolder, `${userId}.mp3`);
     const offsetsPath = join(mergedFolder, `${userId}.offsets.json`);
+    const hasMerged = existsSync(wavPath) && existsSync(mp3Path) && existsSync(offsetsPath);
 
-    if (!forceRemerge && existsSync(wavPath) && existsSync(mp3Path) && existsSync(offsetsPath)) {
+    const hasBrutes = byUser[userId].some((c) => existsSync(join(sessionFolder, c.filename)));
+
+    if (hasMerged && (!forceRemerge || !hasBrutes)) {
       console.log(`♻️ Reaproveitando fusão existente de ${userId}...`);
       const offsets = JSON.parse(readFileSync(offsetsPath, 'utf-8'));
       result[userId] = { wavPath, mp3Path, offsets };
@@ -120,7 +123,7 @@ export function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) 
   }
 
   const silencePath = resolve(join(mergedFolder, '_silence.wav'));
-  generateSilenceFile(silencePath, SILENCE_GAP_SECONDS);
+  await generateSilenceFile(silencePath, SILENCE_GAP_SECONDS);
 
   for (const userId of userIdsToMerge) {
     const allChunks = byUser[userId];
@@ -131,8 +134,9 @@ export function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) 
 
     for (const chunk of allChunks) {
       const chunkPath = resolve(join(sessionFolder, chunk.filename));
-      if (isMostlySilence(chunkPath)) {
+      if (await isMostlySilence(chunkPath)) {
         skippedCount++;
+        try { unlinkSync(chunkPath); } catch {}
         continue;
       }
       chunks.push(chunk);
@@ -153,22 +157,22 @@ export function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) 
     let cumulativeSeconds = 0;
     const listLines = [];
 
-    chunks.forEach((chunk, index) => {
+    for (const [index, chunk] of chunks.entries()) {
       const chunkPath = resolve(join(sessionFolder, chunk.filename));
       offsets.push({ timestamp: chunk.timestamp, offsetSec: cumulativeSeconds });
 
       listLines.push(`file '${chunkPath.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`);
-      cumulativeSeconds += getDurationSecondsReliable(chunkPath);
+      cumulativeSeconds += await getDurationSecondsReliable(chunkPath);
 
       if (index < chunks.length - 1) {
         listLines.push(`file '${silencePath.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`);
         cumulativeSeconds += SILENCE_GAP_SECONDS;
       }
-    });
+    }
 
     writeFileSync(concatListPath, listLines.join('\n'), 'utf-8');
 
-    execFileSync(ffmpegPath, [
+    await execFileAsync([
       '-y',
       '-f', 'concat',
       '-safe', '0',
@@ -178,7 +182,7 @@ export function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) 
     ]);
 
     console.log(`🗜️ Comprimindo ${userId} para upload...`);
-    execFileSync(ffmpegPath, [
+    await execFileAsync([
       '-y',
       '-i', wavPath,
       '-ar', '16000',
@@ -192,6 +196,13 @@ export function mergeSessionAudio(sessionFolder, { forceRemerge = false } = {}) 
 
     result[userId] = { wavPath, mp3Path, offsets };
     console.log(`✅ ${userId}: fundido (${cumulativeSeconds.toFixed(1)}s totais)`);
+
+    for (const chunk of chunks) {
+      const chunkPath = resolve(join(sessionFolder, chunk.filename));
+      try { unlinkSync(chunkPath); } catch {}
+    }
+    try { unlinkSync(concatListPath); } catch {}
+    console.log(`🧹 ${userId}: ${chunks.length} arquivo(s) .wav bruto(s) removido(s) após fusão.`);
   }
 
   return result;
@@ -204,5 +215,8 @@ if (process.argv[1] && process.argv[1].endsWith('mergeAudio.js')) {
     console.error('Uso: node src/mergeAudio.js "caminho/da/pasta/da/sessao" [--force]');
     process.exit(1);
   }
-  mergeSessionAudio(folder, { forceRemerge });
+  mergeSessionAudio(folder, { forceRemerge }).catch((err) => {
+    console.error('❌ Erro na fusão:', err);
+    process.exit(1);
+  });
 }

@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com" />
+  <title>Zaozao Scriber</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700;800&amp;family=JetBrains+Mono:wght@500;700&amp;display=swap');
+
+    :root {
+      --primary: #01020e;
+      --on-primary: #ffffff;
+      --primary-container: #1a1c2c;
+      --on-primary-container: #828498;
+      --primary-fixed: #e1e1f7;
+      --primary-fixed-dim: #c4c5db;
+      --secondary: #7b5800;
+      --on-secondary: #ffffff;
+      --secondary-container: #fdbb24;
+      --on-secondary-container: #6c4d00;
+      --secondary-fixed: #ffdea5;
+      --secondary-fixed-dim: #fdbb24;
+      --surface: #fff9ed;
+      --surface-dim: #e2dabf;
+      --surface-container-lowest: #ffffff;
+      --surface-container-low: #fcf3d8;
+      --surface-container: #f7eed2;
+      --surface-container-high: #f1e8cd;
+      --surface-container-highest: #ebe2c8;
+      --on-surface: #1f1c0b;
+      --on-surface-variant: #46464c;
+      --error: #ba1a1a;
+      --on-error: #ffffff;
+      --error-container: #ffdad6;
+      --on-error-container: #93000a;
+      --outline: #77767d;
+      --outline-variant: #c7c5cd;
+      --background: #fff9ed;
+
+      --font-headline: 'Bricolage Grotesque', sans-serif;
+      --font-body: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--surface);
+      background-image:
+        linear-gradient(45deg, rgba(31, 28, 11, 0.04) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(31, 28, 11, 0.04) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, rgba(31, 28, 11, 0.04) 75%),
+        linear-gradient(-45deg, transparent 75%, rgba(31, 28, 11, 0.04) 75%);
+      background-size: 8px 8px;
+      color: var(--on-surface);
+      margin: 0;
+      padding: 16px;
+      height: 100vh;
+      overflow: hidden;
+      image-rendering: pixelated;
+    }
+
+    h1 {
+      font-family: var(--font-headline);
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0 0 4px 0;
+    }
+
+    .subtitle {
+      color: var(--on-surface-variant);
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 16px;
+    }
+
+    .screen { display: none; }
+    #main-screen.active { display: flex; flex-direction: column; height: 100%; }
+    #setup-screen.active { display: block; overflow-y: auto; }
+
+    label {
+      display: block;
+      font-family: var(--font-body);
+      font-size: 12px;
+      font-weight: 700;
+      margin: 12px 0 4px;
+      color: var(--on-surface-variant);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    input {
+      width: 100%;
+      padding: 10px;
+      border: 3px solid var(--primary);
+      background: var(--surface-container-lowest);
+      color: var(--on-surface);
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 500;
+    }
+    input:focus {
+      outline: none;
+      background: var(--surface-bright);
+      box-shadow: 3px 3px 0 0 var(--primary);
+    }
+
+    button {
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-weight: 700;
+      font-size: 12px;
+      border: 3px solid var(--primary);
+      padding: 10px 16px;
+      margin-top: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      transition: all 0.1s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button:active:not(:disabled) {
+      transform: translate(2px, 2px);
+      box-shadow: 0px 0px 0 0 var(--primary) !important;
+    }
+    .btn-primary {
+      background: var(--primary-container);
+      color: var(--on-primary);
+      box-shadow: 3px 3px 0 0 var(--primary);
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary);
+    }
+    .btn-secondary {
+      background: var(--surface-container-high);
+      color: var(--on-surface);
+      box-shadow: 3px 3px 0 0 var(--primary);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--surface-container-highest);
+    }
+    .btn-danger {
+      background: var(--error-container);
+      color: var(--on-error-container);
+      box-shadow: 3px 3px 0 0 var(--error);
+      border-color: var(--error);
+    }
+    .btn-danger:hover:not(:disabled) {
+      background: var(--error);
+      color: var(--on-error);
+    }
+    .btn-success {
+      background: var(--secondary-container);
+      color: var(--on-secondary-container);
+      box-shadow: 3px 3px 0 0 var(--primary);
+    }
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 11px;
+      box-shadow: 2px 2px 0 0 var(--primary);
+    }
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .btn-row button { flex: 1; }
+
+    /* Tabs */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      margin-bottom: 16px;
+      border-bottom: 3px solid var(--primary);
+    }
+    .tab {
+      padding: 10px 20px;
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border: none;
+      background: none;
+      color: var(--on-surface-variant);
+      border-bottom: 3px solid transparent;
+      margin: 0 0 -3px 0;
+      flex: 1;
+      text-align: center;
+      box-shadow: none !important;
+      transform: none !important;
+    }
+    .tab.active {
+      color: var(--on-surface);
+      border-bottom-color: var(--secondary);
+      background: var(--surface-container-high);
+    }
+    .tab:hover:not(.active) {
+      color: var(--on-surface);
+      background: var(--surface-container-low);
+    }
+    .tab-content { display: none; flex: 1; overflow: hidden; }
+    .tab-content.active { display: flex; flex-direction: column; }
+
+    /* Status box (Gravação) */
+    .status-box {
+      background: var(--surface-container);
+      border: 3px solid var(--primary);
+      box-shadow: 3px 3px 0 0 var(--primary);
+      padding: 16px;
+      text-align: center;
+      margin: 16px 0;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      background: var(--outline);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    .status-dot.recording { background: #23a55a; }
+    .status-dot.paused { background: var(--secondary-container); }
+
+    #status-text {
+      font-family: var(--font-headline);
+      font-weight: 700;
+      font-size: 20px;
+      vertical-align: middle;
+    }
+
+    /* Log */
+    #log {
+      background: var(--surface-container-lowest);
+      border: 3px solid var(--primary);
+      box-shadow: 3px 3px 0 0 var(--primary);
+      padding: 10px;
+      flex: 1;
+      overflow-y: auto;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 500;
+      margin-top: 12px;
+      white-space: pre-wrap;
+      min-height: 100px;
+    }
+    #log::-webkit-scrollbar { width: 10px; }
+    #log::-webkit-scrollbar-track { background: var(--surface-dim); border-left: 2px solid var(--primary); }
+    #log::-webkit-scrollbar-thumb { background: var(--secondary); border: 2px solid var(--primary); }
+
+    /* Session list */
+    #session-list {
+      flex: 1;
+      overflow-y: auto;
+      margin-top: 12px;
+    }
+    #session-list::-webkit-scrollbar { width: 10px; }
+    #session-list::-webkit-scrollbar-track { background: var(--surface-dim); border-left: 2px solid var(--primary); }
+    #session-list::-webkit-scrollbar-thumb { background: var(--secondary); border: 2px solid var(--primary); }
+
+    .session-card {
+      background: var(--surface-container);
+      border: 3px solid var(--primary);
+      box-shadow: 4px 4px 0 0 var(--primary);
+      padding: 16px;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: transform 0.15s;
+    }
+    .session-card:hover {
+      transform: translate(-1px, -1px);
+      box-shadow: 5px 5px 0 0 var(--primary);
+    }
+    .session-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+    .session-name {
+      font-family: var(--font-headline);
+      font-weight: 700;
+      font-size: 16px;
+      flex: 1;
+    }
+    .session-badges { display: flex; gap: 6px; }
+    .badge {
+      font-family: var(--font-body);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border: 2px solid var(--primary);
+    }
+    .badge.transcribed { background: #c8e6c9; color: #1b5e20; border-color: #1b5e20; }
+    .badge.narrated { background: #bbdefb; color: #0d47a1; border-color: #0d47a1; }
+    .badge.pending { background: var(--surface-container-highest); color: var(--on-surface-variant); }
+    .session-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .session-empty {
+      text-align: center;
+      color: var(--on-surface-variant);
+      font-size: 13px;
+      padding: 40px;
+      font-family: var(--font-body);
+    }
+
+    /* Progress bar */
+    .progress-section {
+      background: var(--surface-container);
+      border: 3px solid var(--primary);
+      box-shadow: 3px 3px 0 0 var(--primary);
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .progress-label {
+      font-family: var(--font-body);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      color: var(--on-surface);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .progress-bar-container {
+      background: var(--surface-dim);
+      border: 2px solid var(--primary);
+      height: 10px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      height: 100%;
+      transition: width 0.3s ease;
+    }
+    .progress-bar.transcribe { background: var(--secondary); }
+    .progress-bar.narrate { background: var(--primary-container); }
+    .progress-bar.indeterminate {
+      width: 30%;
+      animation: indeterminate 1.5s infinite;
+    }
+    @keyframes indeterminate {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(400%); }
+    }
+    .progress-section.hidden { display: none; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-box {
+      background: var(--surface);
+      border: 4px solid var(--primary);
+      box-shadow: 6px 6px 0 0 var(--primary);
+      padding: 24px;
+      width: 360px;
+    }
+    .modal-box h1 {
+      font-size: 20px;
+      margin-bottom: 8px;
+    }
+    .modal-box .subtitle {
+      font-size: 12px;
+    }
+
+    /* Channel list buttons inside modal */
+    #channel-list button {
+      display: block;
+      width: 100%;
+    }
+
+    /* Transcribe log */
+    #transcribe-log {
+      background: var(--surface-container-lowest);
+      border: 3px solid var(--primary);
+      box-shadow: 3px 3px 0 0 var(--primary);
+      padding: 10px;
+      margin-top: 12px;
+      max-height: 180px;
+      overflow-y: auto;
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 500;
+      white-space: pre-wrap;
+      display: none;
+    }
+    #transcribe-log::-webkit-scrollbar { width: 10px; }
+    #transcribe-log::-webkit-scrollbar-track { background: var(--surface-dim); border-left: 2px solid var(--primary); }
+    #transcribe-log::-webkit-scrollbar-thumb { background: var(--secondary); border: 2px solid var(--primary); }
+
+    /* Connection subtitle with status */
+    #connection-subtitle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Code inline */
+    code {
+      background: var(--surface-container-high);
+      padding: 2px 6px;
+      border: 2px solid var(--primary);
+      font-family: var(--font-body);
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Tela de configuração (primeira execução) -->
+  <div id="setup-screen" class="screen">
+    <h1>Configuração inicial</h1>
+    <p class="subtitle">Cole as credenciais do seu bot do Discord e da Groq.</p>
+
+    <label>Discord Bot Token</label>
+    <input id="input-token" type="password" />
+
+    <label>Client ID (Application ID)</label>
+    <input id="input-client-id" type="text" />
+
+    <label>Guild ID (ID do servidor)</label>
+    <input id="input-guild-id" type="text" />
+
+    <label>Groq API Key</label>
+    <input id="input-groq-key" type="password" />
+
+    <button class="btn-primary" id="btn-save-config">Salvar e continuar</button>
+  </div>
+
+  <!-- Tela principal com abas -->
+  <div id="main-screen" class="screen">
+    <h1>Zaozao Scriber</h1>
+    <p class="subtitle" id="connection-subtitle">Inicializando...</p>
+
+    <div class="tab-bar">
+      <button class="tab active" data-tab="recording">Gravação</button>
+      <button class="tab" data-tab="transcription">Transcrição & Narrativa</button>
+    </div>
+
+    <!-- Aba: Gravação -->
+    <div class="tab-content active" data-tab="recording">
+      <div class="status-box">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Parado</span>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-start">Iniciar</button>
+        <button class="btn-secondary" id="btn-pause" disabled>Pausar</button>
+        <button class="btn-danger" id="btn-stop" disabled>Parar</button>
+      </div>
+
+      <div id="log"></div>
+    </div>
+
+    <!-- Aba: Transcrição & Narrativa -->
+    <div class="tab-content" data-tab="transcription">
+      <div class="subtitle">Sessões gravadas em <code>src/output</code></div>
+
+      <!-- Area de progresso -->
+      <div class="progress-section hidden" id="progress-section">
+        <div class="progress-label" id="progress-label">Aguardando...</div>
+        <div class="progress-bar-container">
+          <div class="progress-bar indeterminate" id="progress-bar"></div>
+        </div>
+      </div>
+
+      <div id="session-list">
+        <div class="session-empty">Carregando sessões...</div>
+      </div>
+
+      <div style="margin-top: 12px;">
+        <button class="btn-secondary btn-small" id="btn-refresh-sessions">Atualizar lista</button>
+      </div>
+
+      <!-- Log da transcrição/narrativa -->
+      <div id="transcribe-log"></div>
+    </div>
+  </div>
+
+  <!-- Modal: continuar ou nova sessão -->
+  <div class="modal-overlay" id="modal-resume">
+    <div class="modal-box">
+      <h1>Sessão recente encontrada</h1>
+      <p class="subtitle" id="modal-resume-text"></p>
+      <div class="btn-row">
+        <button class="btn-primary" id="btn-modal-continue">Continuar</button>
+        <button class="btn-secondary" id="btn-modal-new">Nova sessão</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: escolher canal de voz -->
+  <div class="modal-overlay" id="modal-channel">
+    <div class="modal-box">
+      <h1>Escolha o canal de voz</h1>
+      <p class="subtitle">Mais de um canal com pessoas foi encontrado.</p>
+      <div id="channel-list"></div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
