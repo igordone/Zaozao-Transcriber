@@ -59,13 +59,26 @@ Principais pacotes e para que servem:
 ### 1. Criar o bot no Discord Developer Portal
 
 1. Acesse https://discord.com/developers/applications → **New Application**
-2. **Bot** → **Reset Token** (ou copie o token existente)
-3. Ative os **Privileged Gateway Intents**: `Server Members Intent` e
-   `Message Content Intent`
-4. **OAuth2 → URL Generator** → marque os escopos `bot` e `applications.commands`
-5. Em **Bot Permissions**, marque: `Connect`, `Speak`, `Use Voice Activity`,
-   `Send Messages`, `View Channels`
-6. Use a URL gerada para convidar o bot para o seu servidor
+   - Dê um nome (ex: "ZaoZao Scriber") e clique em **Create**
+2. Na aba **General Information**:
+   - Copie o **Application ID** (esse é o seu `CLIENT_ID`)
+3. Na aba **Bot**:
+   - Clique em **Reset Token** e copie o token (esse é o seu `DISCORD_TOKEN`)
+   - Role para baixo até **Privileged Gateway Intents** e ative:
+     - `Server Members Intent`
+     - `Message Content Intent`
+   - Em **Authorization Flow**, se houver opção de "Message Content Intent", confirme que está ativo
+4. Na aba **OAuth2 → URL Generator**:
+   - Marque os escopos: `bot` e `applications.commands`
+   - Em **Bot Permissions**, marque:
+     - `Connect`
+     - `Speak`
+     - `Use Voice Activity`
+     - `Send Messages`
+     - `View Channels`
+   - Copie a URL gerada no final da página
+5. Abra a URL no navegador e autorize o bot no seu servidor
+   - Você precisa ter permissão de "Gerenciar Servidor" no Discord para isso
 
 ### 2. Preencher o `.env`
 
@@ -124,7 +137,6 @@ transcription:
     model: 'small'   # tiny | base | small | medium | large
 
 narrative:
-  enabled: true
   # 'groq', 'ollama', ou 'fallback' (Groq → Ollama Cloud → Ollama local)
   provider: 'fallback'
   groq:
@@ -217,12 +229,44 @@ npm run narrate -- "src/output/sessao-2026-07-12T17-12-51-165Z"
 
 Útil para testar ajustes no prompt do `config.yaml` sem esperar a transcrição de novo.
 
+## App Desktop (Electron)
+
+O projeto inclui um app Electron que substitui a linha de comando com uma interface
+gráfica — gravar, pausar, parar, transcrever e gerar narrativa tudo com botões.
+
+### Rodar em desenvolvimento
+
+```powershell
+npm run app
+```
+
+Na primeira execução, o app pede os mesmos dados do `.env` (token do Discord, Client ID,
+Guild ID, chave da Groq) numa tela de configuração. Os dados são salvos automaticamente.
+
+### Gerar o executável (.exe)
+
+```powershell
+npm run build:app
+```
+
+Isso gera `dist\win-unpacked\ZaoZao Scriber.exe` — um executável autossuficiente (não
+precisa de Node.js instalado na máquina). Pode copiar a pasta `win-unpacked` para
+qualquer lugar e rodar o `.exe` diretamente.
+
+> O build pode demorar 10-20 minutos na primeira vez (baixa o Electron, recompila
+> módulos nativos como `@discordjs/opus`, e copia ~1GB de dependências).
+
+> A tentativa de gerar um instalador `.exe` único pode falhar em alguns Windows por
+> causa de um bug do `7zip` baixado pelo electron-builder. Se acontecer, use a pasta
+> `dist\win-unpacked\` — é totalmente funcional.
+
 ## Estrutura de pastas
 
 ```
 discord-rpg-transcriber/
 ├─ src/
 │  ├─ index.js                    # ponto de entrada do bot
+│  ├─ botServer.js                # servidor HTTP local (comunica com o Electron)
 │  ├─ registerCommands.js         # registra os slash commands
 │  ├─ config.js                   # carrega o config.yaml
 │  ├─ mergeAudio.js                # funde + comprime os .wav por pessoa
@@ -247,6 +291,15 @@ discord-rpg-transcriber/
 │        │  └─ [userId].offsets.json  # mapa para reconstruir os timestamps reais
 │        ├─ transcricao.md
 │        └─ narrativa.md
+├─ electron/                       # app desktop (Electron)
+│  ├─ main.js                      # processo principal do Electron
+│  ├─ preload.cjs                  # bridge seguro entre renderer e main
+│  └─ renderer/
+│     ├─ index.html                # interface gráfica
+│     └─ renderer.js                # lógica da UI
+├─ dist/                           # saída do build (ignorado pelo git)
+│  └─ win-unpacked/
+│     └─ ZaoZao Scriber.exe        # executável autossuficiente
 ├─ config.yaml                     # provedores e prompts de cada etapa
 ├─ .env / .env.example
 ├─ .gitignore
