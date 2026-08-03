@@ -7,7 +7,7 @@ import { spawn } from 'child_process';
 import { transcribeAudio, generateSessionNarrative } from '../src/transcribe.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const envPath = join(app.getPath('userData'), '.env');
+const envPath = join(__dirname, '..', '.env');
 const BOT_SERVER_URL = 'http://localhost:4741';
 
 let mainWindow;
@@ -34,29 +34,12 @@ function sendToRenderer(channel, payload) {
   }
 }
 
-/**
- * Sobe o bot como um processo Node.js real e separado do Electron. Isso é
- * necessário porque módulos nativos como @discordjs/opus e sodium-native são
- * compilados para o ABI do Node.js normal, não do runtime interno do
- * Electron - tentar usá-los diretamente dentro do processo do Electron exige
- * recompilar tudo especificamente para o Electron, o que nem sempre tem
- * binário pré-compilado disponível. Rodando como processo filho separado,
- * o bot usa exatamente o mesmo ambiente que já funciona via `npm start`.
- */
 function startBotProcess() {
   return new Promise((resolve, reject) => {
-    const projectRoot = app.isPackaged
-      ? join(process.resourcesPath, 'app')
-      : join(__dirname, '..');
-
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
-    if (existsSync(envPath)) {
-      env.DOTENV_CONFIG_PATH = envPath;
-    }
-    botProcess = spawn(process.execPath, ['src/botServer.js'], {
+    const projectRoot = join(__dirname, '..');
+    botProcess = spawn('node', ['src/botServer.js'], {
       cwd: projectRoot,
-      shell: true,
-      env,
+      shell: false,
     });
 
     botProcess.stdout.on('data', (data) => {
@@ -89,8 +72,6 @@ async function botFetch(path, options = {}) {
   });
   return response.json();
 }
-
-// ---------- Configuração (primeira execução) ----------
 
 ipcMain.handle('config:has-credentials', () => {
   return existsSync(envPath);
@@ -154,7 +135,7 @@ ipcMain.handle('recording:status', async () => {
   return botFetch('/status');
 });
 
-// ---------- Transcrição e narrativa (roda direto no Electron - sem módulos nativos) ----------
+// ---------- Transcrição e narrativa ----------
 
 ipcMain.handle('process:transcribe', async (_event, { folder }) => {
   const originalLog = console.log;
