@@ -3,8 +3,25 @@ let pendingChannelId = null;
 let isTranscribing = false;
 let isNarrating = false;
 
+let editingConfig = null;
+let editingCharacters = null;
+
 const setupScreen = document.getElementById('setup-screen');
 const mainScreen = document.getElementById('main-screen');
+
+const PROVIDER_TYPES = [
+  { value: 'groq', label: 'Groq' },
+  { value: '9router', label: '9Router' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'ollama_cloud', label: 'Ollama Cloud' },
+  { value: 'ollama_local', label: 'Ollama Local' },
+  { value: 'custom', label: 'Custom (OpenAI-compatible)' },
+];
+
+const CHARACTER_ROLES = [
+  { value: 'player', label: 'Jogador' },
+  { value: 'master', label: 'Mestre' },
+];
 
 // ============================================================
 // Utilitários
@@ -45,6 +62,22 @@ document.querySelectorAll('.tab').forEach((tab) => {
     }
   });
 });
+
+// ============================================================
+// Overlay de Configurações
+// ============================================================
+
+function openSettings() {
+  document.getElementById('settings-overlay').classList.add('active');
+  loadSettings();
+}
+
+function closeSettings() {
+  document.getElementById('settings-overlay').classList.remove('active');
+}
+
+document.getElementById('btn-open-settings').addEventListener('click', openSettings);
+document.getElementById('btn-close-settings').addEventListener('click', closeSettings);
 
 // ============================================================
 // Status de gravação
@@ -464,6 +497,337 @@ async function startNarration(session) {
 // Refresh button
 document.getElementById('btn-refresh-sessions').addEventListener('click', () => {
   loadSessionList();
+});
+
+// ============================================================
+// Aba: Configurações
+// ============================================================
+
+async function loadSettings() {
+  const config = await window.api.getConfig();
+  const characters = await window.api.getCharacters();
+
+  if (config.success === false) {
+    console.error('Erro ao carregar config:', config.error);
+    return;
+  }
+  if (characters.success === false) {
+    console.error('Erro ao carregar characters:', characters.error);
+    return;
+  }
+
+  editingConfig = config;
+  editingCharacters = characters;
+
+  renderProviderChain('narrative', 'provider-chain-list', 'narrative');
+  renderProviderChain('transcription', 'transcription-chain-list', 'transcription');
+  renderPrompts();
+  renderCharactersTable();
+}
+
+const TRANSCRIPTION_TYPES = [
+  { value: 'groq', label: 'Groq (Whisper)' },
+  { value: 'local', label: 'Whisper Local' },
+  { value: 'custom', label: 'Custom (OpenAI Whisper-compatible)' },
+];
+
+function renderProviderChain(section, listId, context) {
+  const list = document.getElementById(listId);
+  list.innerHTML = '';
+
+  const chain = editingConfig[section]?.chain;
+  if (!chain || !Array.isArray(chain) || chain.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'subtitle';
+    empty.textContent = 'Nenhum provedor configurado. Adicione o primeiro.';
+    list.appendChild(empty);
+    return;
+  }
+
+  const types = context === 'transcription' ? TRANSCRIPTION_TYPES : PROVIDER_TYPES;
+
+  chain.forEach((provider, index) => {
+    const item = document.createElement('div');
+    item.className = 'provider-chain-item';
+
+    const header = document.createElement('div');
+    header.className = 'provider-chain-item-header';
+
+    const modelGroup = document.createElement('div');
+    modelGroup.className = 'provider-field-group';
+    modelGroup.innerHTML = '<label>Modelo</label>';
+    const modelInput = document.createElement('input');
+    modelInput.type = 'text';
+    modelInput.value = provider.model || '';
+    modelInput.placeholder = provider.type === 'local' && context === 'transcription'
+      ? 'ex: small, medium, large'
+      : context === 'transcription'
+        ? 'ex: whisper-large-v3-turbo'
+        : 'ex: llama-3.1-8b-instant';
+    modelInput.addEventListener('input', () => updateProviderField(section, index, 'model', modelInput.value));
+    modelGroup.appendChild(modelInput);
+    header.appendChild(modelGroup);
+
+    const moveBtns = document.createElement('div');
+    moveBtns.className = 'chain-move-btns';
+
+    const btnUp = document.createElement('button');
+    btnUp.textContent = '▲';
+    btnUp.title = 'Mover para cima';
+    btnUp.disabled = index === 0;
+    btnUp.addEventListener('click', () => moveProvider(section, index, -1));
+
+    const btnDown = document.createElement('button');
+    btnDown.textContent = '▼';
+    btnDown.title = 'Mover para baixo';
+    btnDown.disabled = index === chain.length - 1;
+    btnDown.addEventListener('click', () => moveProvider(section, index, 1));
+
+    moveBtns.appendChild(btnUp);
+    moveBtns.appendChild(btnDown);
+
+    const btnRemove = document.createElement('button');
+    btnRemove.className = 'btn-remove-provider';
+    btnRemove.textContent = '✕';
+    btnRemove.title = 'Remover provedor';
+    btnRemove.addEventListener('click', () => removeProvider(section, index));
+
+    header.appendChild(moveBtns);
+    header.appendChild(btnRemove);
+
+    const fields = document.createElement('div');
+    fields.className = 'provider-row-fields';
+
+    const rowTop = document.createElement('div');
+    rowTop.className = 'provider-row-top';
+
+    const rowBottom = document.createElement('div');
+    rowBottom.className = 'provider-row-bottom';
+
+    const rowLast = document.createElement('div');
+    rowLast.className = 'provider-row-last';
+
+    const typeGroup = document.createElement('div');
+    typeGroup.className = 'provider-field-group';
+    typeGroup.innerHTML = '<label>Tipo</label>';
+    const typeSelect = document.createElement('select');
+    types.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (opt.value === provider.type) o.selected = true;
+      typeSelect.appendChild(o);
+    });
+    typeSelect.addEventListener('change', () => {
+      updateProviderField(section, index, 'type', typeSelect.value);
+      const placeholder = typeSelect.value === 'local' && context === 'transcription'
+        ? 'ex: small, medium, large'
+        : context === 'transcription'
+          ? 'ex: whisper-large-v3-turbo'
+          : 'ex: llama-3.1-8b-instant';
+      modelInput.placeholder = placeholder;
+      urlInput.disabled = typeSelect.value === 'local' && context === 'transcription';
+      urlInput.placeholder = typeSelect.value === 'local' && context === 'transcription'
+        ? '(não usa URL)'
+        : 'Ex: http://localhost:1234/v1';
+    });
+    typeGroup.appendChild(typeSelect);
+    rowTop.appendChild(typeGroup);
+
+    const keyGroup = document.createElement('div');
+    keyGroup.className = 'provider-field-group';
+    keyGroup.innerHTML = '<label>Chave de API</label>';
+    const keyInput = document.createElement('input');
+    keyInput.type = 'password';
+    keyInput.value = provider.api_key || '';
+    keyInput.placeholder = '(vazio se não usar auth)';
+    keyInput.addEventListener('input', () => updateProviderField(section, index, 'api_key', keyInput.value));
+    keyGroup.appendChild(keyInput);
+    rowTop.appendChild(keyGroup);
+
+    const urlGroup = document.createElement('div');
+    urlGroup.className = 'provider-field-group';
+    urlGroup.innerHTML = '<label>Base URL</label>';
+    const urlInput = document.createElement('input');
+    urlInput.type = 'text';
+    urlInput.value = provider.base_url || '';
+    urlInput.placeholder = provider.type === 'local' && context === 'transcription'
+      ? '(não usa URL)'
+      : 'Ex: http://localhost:1234/v1';
+    urlInput.disabled = provider.type === 'local' && context === 'transcription';
+    urlInput.addEventListener('input', () => updateProviderField(section, index, 'base_url', urlInput.value));
+    urlGroup.appendChild(urlInput);
+    rowLast.appendChild(urlGroup);
+
+    fields.appendChild(rowTop);
+    fields.appendChild(rowLast);
+
+    item.appendChild(header);
+    item.appendChild(fields);
+    list.appendChild(item);
+  });
+}
+
+function ensureChain(section) {
+  if (!editingConfig) return;
+  if (!editingConfig[section]) editingConfig[section] = {};
+  if (!editingConfig[section].chain) editingConfig[section].chain = [];
+}
+
+document.getElementById('btn-add-provider').addEventListener('click', () => {
+  ensureChain('narrative');
+  editingConfig.narrative.chain.push({
+    type: 'custom',
+    model: '',
+    api_key: '',
+    base_url: '',
+  });
+  renderProviderChain('narrative', 'provider-chain-list', 'narrative');
+});
+
+document.getElementById('btn-add-transcription-provider').addEventListener('click', () => {
+  ensureChain('transcription');
+  editingConfig.transcription.chain.push({
+    type: 'custom',
+    model: '',
+    api_key: '',
+    base_url: '',
+  });
+  renderProviderChain('transcription', 'transcription-chain-list', 'transcription');
+});
+
+function updateProviderField(section, index, prop, value) {
+  if (editingConfig[section].chain[index]) {
+    editingConfig[section].chain[index][prop] = value;
+  }
+}
+
+function moveProvider(section, index, direction) {
+  const chain = editingConfig[section].chain;
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= chain.length) return;
+  [chain[index], chain[newIndex]] = [chain[newIndex], chain[index]];
+  renderProviderChain(section, section === 'narrative' ? 'provider-chain-list' : 'transcription-chain-list', section);
+}
+
+function removeProvider(section, index) {
+  editingConfig[section].chain.splice(index, 1);
+  renderProviderChain(section, section === 'narrative' ? 'provider-chain-list' : 'transcription-chain-list', section);
+}
+
+function renderPrompts() {
+  const narrative = editingConfig.narrative || {};
+  document.getElementById('settings-condense-prompt').value = narrative.condense_prompt || '';
+  document.getElementById('settings-final-prompt').value = narrative.final_prompt || '';
+}
+
+function renderCharactersTable() {
+  const tbody = document.getElementById('characters-tbody');
+  tbody.innerHTML = '';
+
+  const entries = Object.entries(editingCharacters);
+  entries.forEach(([discordId, char]) => {
+    const row = document.createElement('tr');
+
+    const idCell = document.createElement('td');
+    const idInput = document.createElement('input');
+    idInput.type = 'text';
+    idInput.value = discordId;
+    idInput.placeholder = 'ID do Discord';
+    idInput.dataset.originalId = discordId;
+    idInput.dataset.prop = 'discordId';
+    idInput.addEventListener('change', () => {
+      const oldId = idInput.dataset.originalId;
+      const newId = idInput.value.trim();
+      if (newId && newId !== oldId) {
+        editingCharacters[newId] = editingCharacters[oldId];
+        delete editingCharacters[oldId];
+        idInput.dataset.originalId = newId;
+      }
+    });
+    idCell.appendChild(idInput);
+
+    const nameCell = document.createElement('td');
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.value = char.name || '';
+    nameInput.placeholder = 'Nome do personagem';
+    nameInput.addEventListener('change', () => {
+      if (editingCharacters[discordId]) {
+        editingCharacters[discordId].name = nameInput.value;
+      }
+    });
+    nameCell.appendChild(nameInput);
+
+    const roleCell = document.createElement('td');
+    const roleSelect = document.createElement('select');
+    CHARACTER_ROLES.forEach((opt) => {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (opt.value === char.role) o.selected = true;
+      roleSelect.appendChild(o);
+    });
+    roleSelect.addEventListener('change', () => {
+      if (editingCharacters[discordId]) {
+        editingCharacters[discordId].role = roleSelect.value;
+      }
+    });
+    roleCell.appendChild(roleSelect);
+
+    const actionsCell = document.createElement('td');
+    const btnRemove = document.createElement('button');
+    btnRemove.className = 'btn-remove-char';
+    btnRemove.textContent = '✕';
+    btnRemove.title = 'Remover personagem';
+    btnRemove.addEventListener('click', () => {
+      delete editingCharacters[discordId];
+      renderCharactersTable();
+    });
+    actionsCell.appendChild(btnRemove);
+
+    row.append(idCell, nameCell, roleCell, actionsCell);
+    tbody.appendChild(row);
+  });
+}
+
+document.getElementById('btn-add-character').addEventListener('click', () => {
+  const newId = 'new-' + Date.now();
+  editingCharacters[newId] = { name: '', role: 'player' };
+  renderCharactersTable();
+});
+
+document.getElementById('btn-save-settings').addEventListener('click', async () => {
+  const narrative = editingConfig.narrative || {};
+
+  narrative.condense_prompt = document.getElementById('settings-condense-prompt').value;
+  narrative.final_prompt = document.getElementById('settings-final-prompt').value;
+
+  const cleanedCharacters = {};
+  for (const [id, char] of Object.entries(editingCharacters)) {
+    if (id.startsWith('new-')) continue;
+    if (!char.name && !char.role) continue;
+    cleanedCharacters[id] = { name: char.name || '', role: char.role || 'player' };
+  }
+
+  const configResult = await window.api.saveConfig(editingConfig);
+  const charResult = await window.api.saveCharacters(cleanedCharacters);
+
+  const feedback = document.getElementById('settings-save-feedback');
+
+  if (configResult.success && charResult.success) {
+    feedback.className = 'settings-feedback success';
+    feedback.textContent = 'Configurações salvas com sucesso!';
+    editingCharacters = cleanedCharacters;
+    setTimeout(() => { feedback.textContent = ''; }, 3000);
+  } else {
+    feedback.className = 'settings-feedback error';
+    feedback.textContent = 'Erro ao salvar: ' + (configResult.error || charResult.error);
+  }
+});
+
+document.getElementById('btn-reload-settings').addEventListener('click', () => {
+  loadSettings();
 });
 
 // ============================================================

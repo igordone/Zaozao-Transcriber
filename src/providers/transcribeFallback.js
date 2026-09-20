@@ -1,29 +1,52 @@
 import { transcribeMergedWithGroq } from './transcribeGroq.js';
 import { transcribeMergedWithLocalWhisper } from './transcribeLocal.js';
+import { transcribeMergedWithCustomWhisper } from './transcribeCustom.js';
 
-/**
- * Tenta a Groq (usando o .mp3 comprimido) primeiro; cai automaticamente
- * para o Whisper local (usando o .wav original, sem compressão) quando:
- * - o rate limit da Groq persiste
- * - o arquivo excede o limite de tamanho da Groq mesmo comprimido
- *
- * Recebe um objeto { wavPath, mp3Path } em vez de um único filePath, pois
- * cada provedor precisa de um formato diferente.
- */
+function resolveChain(config) {
+  const chain = config?.chain;
+  if (Array.isArray(chain) && chain.length > 0) return chain;
+  return [];
+}
+
 export async function transcribeMergedWithFallback({ wavPath, mp3Path }, config) {
+  const chain = resolveChain(config);
+
+  if (chain.length === 0) {
+    try {
+      return await transcribeMergedWithGroq(mp3Path, config);
+    } catch (err) {
+      if (err.message === 'GROQ_RATE_LIMITED' || err.message === 'GROQ_FILE_TOO_LARGE') {
+        console.log('🔀 Groq indisponível — usando Whisper local...');
+        return transcribeMergedWithLocalWhisper(wavPath, config);
+      }
+      throw err;
+    }
+  }
+
+  let lastError;
+  for (const provider of chain) {
+    const label = provider.name || provider.type;
+    try {
+      if (provider.type === 'groq') {
+        return await transcribeMergedWithGroq(mp3Path, { provider });
+      }
+      if (provider.type === 'local') {
+        return await transcribeMergedWithLocalWhisper(wavPath, { local: provider });
+      }
+      if (provider.type === 'custom') {
+        return await transcribeMergedWithCustomWhisper(mp3Path, provider);
+      }
+      throw new Error(`Tipo de transcrição desconhecido: ${provider.type}`);
+    } catch (err) {
+      lastError = err;
+      console.log(`🔀 ${label} indisponível (${err.message}) — tentando próximo...`);
+    }
+  }
+
+  console.log('🔀 Todos os provedores de transcrição falharam — usando Whisper local como último recurso...');
   try {
-    return await transcribeMergedWithGroq(mp3Path, config);
-  } catch (err) {
-    if (err.message === 'GROQ_RATE_LIMITED') {
-      console.log('🔀 Groq indisponível (rate limit) — usando Whisper local para este arquivo...');
-      return transcribeMergedWithLocalWhisper(wavPath, config);
-    }
-
-    if (err.message === 'GROQ_FILE_TOO_LARGE') {
-      console.log('🔀 Arquivo grande demais mesmo comprimido — usando Whisper local...');
-      return transcribeMergedWithLocalWhisper(wavPath, config);
-    }
-
-    throw err;
+    return await transcribeMergedWithLocalWhisper(wavPath, config);
+  } catch (localErr) {
+    throw lastError || localErr;
   }
 }

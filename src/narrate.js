@@ -49,25 +49,29 @@ function removeDuplicateLines(text) {
   return unique.join('\n');
 }
 
-/**
- * Tenta a Groq com poucas re-tentativas curtas (só pra falhas passageiras).
- * Se persistir (rate limit real, diário ou não), sinaliza pra cair no fallback.
- */
-async function tryGroqChat(systemPrompt, userContent, config, attempt = 1) {
-  const MAX_QUICK_ATTEMPTS = 2; // tentativas curtas antes de desistir e cair no local
+// ============================================================
+// Chamadas por tipo de provedor
+// ============================================================
+
+async function callGroq(systemPrompt, userContent, provider, attempt = 1) {
+  const MAX_QUICK_ATTEMPTS = 2;
 
   if (Date.now() < groqCooldownUntil) {
     throw new Error('GROQ_RATE_LIMITED');
   }
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+  const baseUrl = (provider.base_url || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
+  const apiKey = provider.api_key || process.env.GROQ_API_KEY;
+  const model = provider.model || 'llama-3.1-8b-instant';
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: config.groq.model,
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
@@ -83,19 +87,17 @@ async function tryGroqChat(systemPrompt, userContent, config, attempt = 1) {
     const delay = parseRetryDelay(errorText);
 
     if (attempt >= MAX_QUICK_ATTEMPTS || delay > 30000) {
-      // Marca cooldown pelo tempo sugerido pela API (ou 60s como padrão seguro)
       groqCooldownUntil = Date.now() + Math.min(delay, 120000);
       throw new Error('GROQ_RATE_LIMITED');
     }
 
     console.log(`⏳ Rate limit. Aguardando ${(delay / 1000).toFixed(1)}s...`);
     await sleep(delay);
-    return tryGroqChat(systemPrompt, userContent, config, attempt + 1);
+    return callGroq(systemPrompt, userContent, provider, attempt + 1);
   }
 
   if (response.status === 413) {
-    console.log('⚠️ Requisição grande demais para a Groq neste modelo — caindo para o próximo nível...');
-    throw new Error('GROQ_RATE_LIMITED'); // reaproveita o mesmo sinal de fallback
+    throw new Error('GROQ_RATE_LIMITED');
   }
 
   if (!response.ok) throw new Error(`Groq retornou ${response.status}: ${await response.text()}`);
@@ -103,12 +105,17 @@ async function tryGroqChat(systemPrompt, userContent, config, attempt = 1) {
   return data.choices[0].message.content;
 }
 
-async function callOllamaChat(systemPrompt, userContent, config) {
-  const response = await fetch(`${config.ollama.base_url}/chat/completions`, {
+async function callOpenRouter(systemPrompt, userContent, provider) {
+  const baseUrl = provider.base_url || 'https://openrouter.ai/api/v1';
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${provider.api_key}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
-      model: config.ollama.model,
+      model: provider.model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
@@ -117,17 +124,19 @@ async function callOllamaChat(systemPrompt, userContent, config) {
     }),
   });
 
-  if (!response.ok) throw new Error(`Ollama retornou ${response.status}: ${await response.text()}`);
+  if (!response.ok) throw new Error(`OpenRouter retornou ${response.status}: ${await response.text()}`);
   const data = await response.json();
   return data.choices[0].message.content;
 }
 
-async function callOllamaModel(systemPrompt, userContent, ollamaConfig) {
-  const response = await fetch(`${ollamaConfig.base_url}/chat/completions`, {
+async function callOllama(systemPrompt, userContent, provider) {
+  const baseUrl = provider.base_url || 'http://localhost:11434/v1';
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: ollamaConfig.model,
+      model: provider.model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent },
@@ -136,49 +145,163 @@ async function callOllamaModel(systemPrompt, userContent, ollamaConfig) {
     }),
   });
 
-  if (!response.ok) throw new Error(`Ollama (${ollamaConfig.model}) retornou ${response.status}: ${await response.text()}`);
+  if (!response.ok) throw new Error(`Ollama (${provider.model}) retornou ${response.status}: ${await response.text()}`);
   const data = await response.json();
   return data.choices[0].message.content;
+}
+
+async function call9Router(systemPrompt, userContent, provider) {
+  const baseUrl = provider.base_url || 'http://localhost:20128/v1';
+  const headers = { 'Content-Type': 'application/json' };
+  if (provider.api_key) {
+    headers.Authorization = `Bearer ${provider.api_key}`;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
+
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: provider.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        temperature: 0.4,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) throw new Error(`9Router retornou ${response.status}: ${await response.text()}`);
+    const text = await response.text();
+    const jsonText = text.replace(/^data: \[DONE\].*/s, '').trim();
+    const data = JSON.parse(jsonText);
+    return data.choices[0].message.content;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function callCustom(systemPrompt, userContent, provider) {
+  const baseUrl = (provider.base_url || '').replace(/\/$/, '');
+  if (!baseUrl) throw new Error('Base URL é obrigatória para provedores customizados.');
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (provider.api_key) {
+    headers.Authorization = `Bearer ${provider.api_key}`;
+  }
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: provider.model || '',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+      temperature: 0.4,
+    }),
+  });
+
+  if (!response.ok) throw new Error(`${provider.name || 'Custom'} retornou ${response.status}: ${await response.text()}`);
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+async function callSingleProvider(systemPrompt, userContent, provider) {
+  switch (provider.type) {
+    case 'groq':
+      return callGroq(systemPrompt, userContent, provider);
+    case '9router':
+      return call9Router(systemPrompt, userContent, provider);
+    case 'openrouter':
+      return callOpenRouter(systemPrompt, userContent, provider);
+    case 'ollama':
+    case 'ollama_cloud':
+    case 'ollama_local':
+      return callOllama(systemPrompt, userContent, provider);
+    case 'custom':
+      return callCustom(systemPrompt, userContent, provider);
+    default:
+      throw new Error(`Tipo de provedor desconhecido: ${provider.type}`);
+  }
+}
+
+// ============================================================
+// Resolve a cadeia de provedores (formato novo ou legado)
+// ============================================================
+
+function resolveChain(config) {
+  if (config.chain && Array.isArray(config.chain) && config.chain.length > 0) {
+    return config.chain;
+  }
+
+  // Compatibilidade com o formato legado (provider + groq/ollama_cloud/ollama)
+  if (config.provider === 'ollama' && config.ollama) {
+    return [{ type: 'ollama_local', ...config.ollama }];
+  }
+
+  if (config.provider === 'fallback' || !config.provider) {
+    const chain = [];
+    if (config.groq) chain.push({ type: 'groq', ...config.groq });
+    if (config.ollama_cloud) chain.push({ type: 'ollama_cloud', ...config.ollama_cloud });
+    if (config.ollama) chain.push({ type: 'ollama_local', ...config.ollama });
+    return chain;
+  }
+
+  if (config.provider === 'groq' && config.groq) {
+    return [{ type: 'groq', ...config.groq }];
+  }
+
+  return [];
 }
 
 async function callProvider(systemPrompt, userContent, config) {
-  if (config.provider === 'ollama') {
-    return callOllamaModel(systemPrompt, userContent, config.ollama);
+  const chain = resolveChain(config);
+
+  if (chain.length === 0) {
+    throw new Error('Nenhum provedor de narrativa configurado.');
   }
 
-  if (config.provider === 'fallback') {
-    // Nível 1: Groq
-    try {
-      return await tryGroqChat(systemPrompt, userContent, config);
-    } catch (err) {
-      if (err.message !== 'GROQ_RATE_LIMITED') throw err;
-    }
+  let lastError;
 
-    // Nível 2: Ollama Cloud (gemma4:cloud - grátis, roda nos servidores da Ollama)
-    console.log('🔀 Groq indisponível — tentando modelo em nuvem (Ollama Cloud)...');
-    try {
-      return await callOllamaModel(systemPrompt, userContent, config.ollama_cloud);
-    } catch (err) {
-      console.log(`🔀 Ollama Cloud indisponível (${err.message}) — usando modelo local...`);
-    }
+  for (const [index, provider] of chain.entries()) {
+    const label = provider.name || (provider.type === 'ollama_local' ? 'Ollama local' :
+                  provider.type === 'ollama_cloud' ? 'Ollama Cloud' :
+                  provider.type === 'openrouter' ? 'OpenRouter' :
+                  provider.type === '9router' ? '9Router' :
+                  provider.type === 'custom' ? (provider.base_url || 'Custom') :
+                  provider.type);
 
-    // Nível 3: Ollama local (llama3.1 - sem limite, mas mais lento)
-    return callOllamaModel(systemPrompt, userContent, config.ollama);
+    try {
+      return await callSingleProvider(systemPrompt, userContent, provider);
+    } catch (err) {
+      lastError = err;
+      const isLast = index === chain.length - 1;
+      if (!isLast) {
+        console.log(`\u23AF\u23AF ${label} indispon\u00EDvel (${err.message}) \u2014 tentando pr\u00F3ximo provedor...`);
+      }
+    }
   }
 
-  return tryGroqChat(systemPrompt, userContent, config);
+  throw lastError || new Error('Todos os provedores falharam.');
 }
 
 async function condenseChunks(chunks, config, onProgress) {
   const summaries = [];
 
   for (const [index, chunk] of chunks.entries()) {
-    console.log(`📝 Condensando pedaço ${index + 1}/${chunks.length}...`);
+    console.log(`\uD83D\uDcdd Condensando peda\u00E7o ${index + 1}/${chunks.length}...`);
     try {
       const summary = await callProvider(config.condense_prompt, chunk, config);
       summaries.push(removeDuplicateLines(summary.trim()));
     } catch (err) {
-      console.error(`❌ Erro ao condensar pedaço ${index + 1}:`, err.message);
+      console.error(`\u274C Erro ao condensar peda\u00E7o ${index + 1}:`, err.message);
       summaries.push('');
     }
     if (onProgress) onProgress(summaries.filter(Boolean).join('\n\n---\n\n'));
@@ -189,18 +312,18 @@ async function condenseChunks(chunks, config, onProgress) {
 
 async function composeFinalNarrative(summaries, config) {
   const combined = summaries.map((s, i) => `[Trecho ${i + 1}]\n${s}`).join('\n\n');
-  console.log('📖 Compondo narrativa final a partir de todos os resumos...');
+  console.log('\uD83D\uDCD6 Compondo narrativa final a partir de todos os resumos...');
   return callProvider(config.final_prompt, combined, config);
 }
 
 export async function generateNarrative(transcript, config, onProgress) {
   const chunks = splitIntoChunks(transcript, CHUNK_SIZE_CHARS);
-  console.log(`📚 Transcrição dividida em ${chunks.length} pedaço(s) para condensação.`);
+  console.log(`\uD83D\uDDC2 Transcri\u00E7\u00E3o dividida em ${chunks.length} peda\u00E7o(s) para condensa\u00E7\u00E3o.`);
 
   const summaries = await condenseChunks(chunks, config, onProgress);
 
   if (summaries.length === 0) {
-    return '⚠️ Não foi possível gerar a narrativa: nenhum resumo válido foi produzido.';
+    return '\u26A0\uFE0F N\u00E3o foi poss\u00EDvel gerar a narrativa: nenhum resumo v\u00E1lido foi produzido.';
   }
 
   const finalNarrative = await composeFinalNarrative(summaries, config);

@@ -1,13 +1,38 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, writeFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, writeFileSync, readFileSync, readdirSync, statSync, mkdirSync, copyFileSync } from 'fs';
 import { spawn } from 'child_process';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 import { transcribeAudio, generateSessionNarrative } from '../src/transcribe.js';
+import { getRootDir, getEnvPath, getConfigPath, getCharactersPath, getOutputDir, setRootDir } from '../src/paths.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const envPath = join(__dirname, '..', '.env');
+
+if (app.isPackaged) {
+  setRootDir(dirname(app.getPath('exe')));
+}
+
+const rootDir = getRootDir();
+const envPath = getEnvPath();
+const configPath = getConfigPath();
+const charactersPath = getCharactersPath();
+const outputDir = getOutputDir();
+
+if (app.isPackaged) {
+  const bundledConfig = resolve(__dirname, '..', 'config.yaml');
+  const bundledCharacters = resolve(__dirname, '..', 'src', 'characters.json');
+  if (!existsSync(configPath) && existsSync(bundledConfig)) {
+    copyFileSync(bundledConfig, configPath);
+  }
+  if (!existsSync(charactersPath) && existsSync(bundledCharacters)) {
+    mkdirSync(dirname(charactersPath), { recursive: true });
+    copyFileSync(bundledCharacters, charactersPath);
+  }
+}
+
+if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
 const BOT_SERVER_URL = 'http://localhost:4741';
 
 let mainWindow;
@@ -15,8 +40,8 @@ let botProcess = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 480,
-    height: 640,
+    width: 520,
+    height: 720,
     resizable: false,
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
@@ -35,11 +60,18 @@ function sendToRenderer(channel, payload) {
 }
 
 function startBotProcess() {
-  return new Promise((resolve, reject) => {
-    const projectRoot = join(__dirname, '..');
-    botProcess = spawn('node', ['src/botServer.js'], {
-      cwd: projectRoot,
+  return new Promise((resolvePromise, reject) => {
+    const botScriptPath = app.isPackaged
+      ? resolve(__dirname, '..', 'src', 'botServer.js')
+      : resolve(rootDir, 'src', 'botServer.js');
+    botProcess = spawn('node', [botScriptPath], {
+      cwd: rootDir,
       shell: false,
+      env: {
+        ...process.env,
+        ZAOZAO_ROOT: rootDir,
+        DOTENV_CONFIG_PATH: envPath,
+      },
     });
 
     botProcess.stdout.on('data', (data) => {
@@ -48,7 +80,7 @@ function startBotProcess() {
       sendToRenderer('process:log', text.trim());
 
       if (text.includes('Servidor de controle do bot rodando')) {
-        resolve();
+        resolvePromise();
       }
     });
 
@@ -87,6 +119,43 @@ ipcMain.handle('config:save-credentials', async (_event, { discordToken, clientI
 
   writeFileSync(envPath, content, 'utf-8');
   return { success: true };
+});
+
+// ---------- Configuração (config.yaml + characters.json) ----------
+
+ipcMain.handle('config:get', () => {
+  try {
+    return parseYaml(readFileSync(configPath, 'utf-8'));
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('config:save', (_event, configObject) => {
+  try {
+    writeFileSync(configPath, stringifyYaml(configObject), 'utf-8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('characters:get', () => {
+  try {
+    if (!existsSync(charactersPath)) return {};
+    return JSON.parse(readFileSync(charactersPath, 'utf-8'));
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('characters:save', (_event, charactersObject) => {
+  try {
+    writeFileSync(charactersPath, JSON.stringify(charactersObject, null, 2), 'utf-8');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 // ---------- Bot / conexão com o Discord ----------
@@ -178,8 +247,6 @@ ipcMain.handle('process:narrate', async (_event, { folder }) => {
 });
 
 // ---------- Sessões ----------
-
-const outputDir = join(__dirname, '..', 'src', 'output');
 
 function parseSessionTimestamp(name) {
   const match = name.match(/^sessao-(.+)Z$/);

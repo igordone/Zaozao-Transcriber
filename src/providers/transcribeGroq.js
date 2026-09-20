@@ -37,6 +37,11 @@ const HALLUCINATION_PATTERNS = [
 export async function transcribeMergedWithGroq(mp3Path, config, attempt = 1) {
   const MAX_QUICK_ATTEMPTS = 2;
 
+  const provider = config?.provider || config?.groq || {};
+  const baseUrl = (provider.base_url || 'https://api.groq.com/openai/v1').replace(/\/$/, '');
+  const apiKey = provider.api_key || process.env.GROQ_API_KEY;
+  const model = provider.model || 'whisper-large-v3-turbo';
+
   const fileSize = statSync(mp3Path).size;
   if (fileSize > GROQ_MAX_FILE_SIZE_BYTES) {
     throw new Error('GROQ_FILE_TOO_LARGE');
@@ -47,14 +52,14 @@ export async function transcribeMergedWithGroq(mp3Path, config, attempt = 1) {
 
   const form = new FormData();
   form.append('file', blob, mp3Path.split(/[\\/]/).pop());
-  form.append('model', config.groq.model);
+  form.append('model', model);
   form.append('language', 'pt');
   form.append('response_format', 'verbose_json');
   form.append('temperature', '0');
 
-  const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+  const response = await fetch(`${baseUrl}/audio/transcriptions`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    headers: { Authorization: `Bearer ${apiKey}` },
     body: form,
   });
 

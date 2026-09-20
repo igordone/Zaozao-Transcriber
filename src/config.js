@@ -1,12 +1,13 @@
 import { readFileSync } from 'fs';
 import { parse } from 'yaml';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { getConfigPath } from './paths.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+function resolveEnvVars(text) {
+  return text.replace(/\$\{(\w+)\}/g, (_, name) => process.env[name] ?? '');
+}
 
 export function loadConfig() {
-  const configPath = join(__dirname, '..', 'config.yaml');
+  const configPath = getConfigPath();
   const file = readFileSync(configPath, 'utf-8');
-  return parse(file);
+  return parse(resolveEnvVars(file));
 }

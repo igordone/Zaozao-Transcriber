@@ -1,5 +1,8 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { getEnvPath } from './paths.js';
+
+dotenv.config({ path: getEnvPath() });
 
 const commands = [
   new SlashCommandBuilder()

@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
-dotenv.config({ path: process.env.DOTENV_CONFIG_PATH });
+import { getEnvPath } from './paths.js';
+dotenv.config({ path: process.env.DOTENV_CONFIG_PATH || getEnvPath() });
 import { createServer } from 'http';
 import { createBotClient } from './index.js';
 import {

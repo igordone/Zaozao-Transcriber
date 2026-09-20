@@ -1,8 +1,11 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { loadConfig } from './config.js';
+import { getEnvPath } from './paths.js';
 import { generateNarrative } from './narrate.js';
+
+dotenv.config({ path: getEnvPath() });
 
 const folder = process.argv[2];
 if (!folder) {

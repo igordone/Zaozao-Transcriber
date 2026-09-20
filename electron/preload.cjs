@@ -4,6 +4,10 @@ contextBridge.exposeInMainWorld('api', {
   // Configuração
   hasCredentials: () => ipcRenderer.invoke('config:has-credentials'),
   saveCredentials: (data) => ipcRenderer.invoke('config:save-credentials', data),
+  getConfig: () => ipcRenderer.invoke('config:get'),
+  saveConfig: (config) => ipcRenderer.invoke('config:save', config),
+  getCharacters: () => ipcRenderer.invoke('characters:get'),
+  saveCharacters: (chars) => ipcRenderer.invoke('characters:save', chars),
 
   // Bot / Discord
   connectBot: () => ipcRenderer.invoke('bot:connect'),

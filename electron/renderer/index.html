@@ -67,11 +67,42 @@
       margin: 0 0 4px 0;
     }
 
+    .header-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+    }
+    .header-row h1 { margin-bottom: 0; }
+
     .subtitle {
       color: var(--on-surface-variant);
       font-size: 12px;
       font-weight: 500;
       margin-bottom: 16px;
+    }
+
+    .btn-settings-icon {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      margin: 0;
+      border: 3px solid var(--primary);
+      background: var(--surface-container-high);
+      box-shadow: 3px 3px 0 0 var(--primary);
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 30px;
+      text-align: center;
+      color: var(--on-surface);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.1s;
+      flex-shrink: 0;
+    }
+    .btn-settings-icon:active {
+      transform: translate(2px, 2px);
+      box-shadow: 0px 0px 0 0 var(--primary);
     }
 
     .screen { display: none; }
@@ -417,6 +448,268 @@
       font-family: var(--font-body);
       font-size: 11px;
     }
+
+    /* Settings tab */
+    .settings-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+    .settings-scroll::-webkit-scrollbar { width: 10px; }
+    .settings-scroll::-webkit-scrollbar-track { background: var(--surface-dim); border-left: 2px solid var(--primary); }
+    .settings-scroll::-webkit-scrollbar-thumb { background: var(--secondary); border: 2px solid var(--primary); }
+
+    .settings-section-title {
+      font-family: var(--font-headline);
+      font-size: 16px;
+      font-weight: 700;
+      margin: 20px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 2px solid var(--primary);
+    }
+    .settings-section-title:first-child { margin-top: 0; }
+
+    .settings-textarea {
+      width: 100%;
+      padding: 10px;
+      border: 3px solid var(--primary);
+      background: var(--surface-container-lowest);
+      color: var(--on-surface);
+      font-family: var(--font-body);
+      font-size: 11px;
+      font-weight: 500;
+      resize: vertical;
+      margin-bottom: 12px;
+    }
+    .settings-textarea:focus {
+      outline: none;
+      box-shadow: 3px 3px 0 0 var(--primary);
+    }
+
+    .provider-chain-item {
+      background: var(--surface-container);
+      border: 3px solid var(--primary);
+      box-shadow: 3px 3px 0 0 var(--primary);
+      padding: 12px;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .provider-chain-item-header {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+    }
+    .provider-chain-item-header > .provider-field-group {
+      flex: 1;
+    }
+    .provider-chain-item-header select,
+    .provider-chain-item-header input {
+      width: 100%;
+      padding: 6px 8px;
+      font-size: 11px;
+      border: 2px solid var(--primary);
+      background: var(--surface-container-lowest);
+      color: var(--on-surface);
+      font-family: var(--font-body);
+    }
+    .provider-chain-item-header label {
+      font-size: 10px;
+      margin: 0 0 2px 0;
+      text-transform: none;
+      letter-spacing: 0;
+      display: block;
+    }
+    .provider-row-fields {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .provider-row-top {
+      display: flex;
+      gap: 6px;
+    }
+    .provider-row-bottom {
+      display: flex;
+      gap: 6px;
+    }
+    .provider-row-bottom > .provider-field-group {
+      flex: 1;
+    }
+    .provider-row-last > .provider-field-group {
+      flex: 1;
+    }
+    .provider-row-fields select,
+    .provider-row-fields input {
+      width: 100%;
+      padding: 6px 8px;
+      font-size: 11px;
+      border: 2px solid var(--primary);
+      background: var(--surface-container-lowest);
+      color: var(--on-surface);
+      font-family: var(--font-body);
+    }
+    .provider-row-fields select:focus,
+    .provider-row-fields input:focus {
+      outline: none;
+      box-shadow: 2px 2px 0 0 var(--primary);
+    }
+    .provider-row-fields label {
+      font-size: 10px;
+      margin: 0 0 2px 0;
+      text-transform: none;
+      letter-spacing: 0;
+      display: block;
+    }
+    .provider-field-group {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-width: 0;
+    }
+    .provider-row-top > .provider-field-group {
+      min-width: 80px;
+    }
+    .chain-move-btns {
+      display: flex;
+      gap: 4px;
+    }
+    .chain-move-btns button {
+      padding: 4px 10px;
+      font-size: 14px;
+      margin: 0;
+      border: 2px solid var(--primary);
+      background: var(--surface-container-high);
+      box-shadow: 2px 2px 0 0 var(--primary);
+    }
+    .btn-remove-provider {
+      padding: 4px 10px;
+      font-size: 16px;
+      margin: 0;
+      border: 2px solid var(--error);
+      background: var(--error-container);
+      color: var(--on-error-container);
+      box-shadow: 2px 2px 0 0 var(--error);
+    }
+
+    .characters-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      margin-bottom: 8px;
+      font-family: var(--font-body);
+      font-size: 11px;
+    }
+    .characters-table th {
+      background: var(--surface-container-high);
+      border: 2px solid var(--primary);
+      padding: 6px 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-size: 10px;
+      text-align: left;
+    }
+    .characters-table td {
+      border: 2px solid var(--primary);
+      padding: 4px;
+      background: var(--surface-container-lowest);
+    }
+    .characters-table input,
+    .characters-table select {
+      width: 100%;
+      padding: 4px 6px;
+      border: 2px solid var(--primary);
+      background: var(--surface-container-lowest);
+      color: var(--on-surface);
+      font-family: var(--font-body);
+      font-size: 11px;
+    }
+    .characters-table input:focus,
+    .characters-table select:focus {
+      outline: none;
+      box-shadow: 2px 2px 0 0 var(--primary);
+    }
+    .characters-table .btn-remove-char {
+      padding: 4px 10px;
+      font-size: 14px;
+      margin: 0;
+      border: 2px solid var(--error);
+      background: var(--error-container);
+      color: var(--on-error-container);
+      box-shadow: 2px 2px 0 0 var(--error);
+    }
+
+    .settings-feedback {
+      margin-top: 12px;
+      font-family: var(--font-body);
+      font-size: 12px;
+      font-weight: 700;
+      min-height: 16px;
+    }
+    .settings-feedback.success { color: #1b5e20; }
+    .settings-feedback.error { color: var(--error); }
+
+    /* Settings overlay */
+    .settings-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: var(--surface);
+      z-index: 100;
+      overflow: hidden;
+    }
+    .settings-overlay.active { display: flex; flex-direction: column; }
+    .settings-overlay-inner {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: 16px;
+    }
+    .settings-overlay-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+      flex-shrink: 0;
+    }
+    .settings-overlay-header h1 {
+      font-family: var(--font-headline);
+      font-size: 20px;
+      font-weight: 700;
+      margin: 0;
+    }
+    .btn-settings-close {
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      margin: 0;
+      border: 3px solid var(--primary);
+      background: var(--surface-container-high);
+      box-shadow: 3px 3px 0 0 var(--primary);
+      cursor: pointer;
+      font-size: 24px;
+      line-height: 1;
+      text-align: center;
+      color: var(--on-surface);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.1s;
+      flex-shrink: 0;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .btn-settings-close:active {
+      transform: translate(2px, 2px);
+      box-shadow: 0px 0px 0 0 var(--primary);
+    }
+    .settings-overlay .settings-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
   </style>
 </head>
 <body>
@@ -443,8 +736,13 @@
 
   <!-- Tela principal com abas -->
   <div id="main-screen" class="screen">
-    <h1>Zaozao Scriber</h1>
-    <p class="subtitle" id="connection-subtitle">Inicializando...</p>
+    <div class="header-row">
+      <div>
+        <h1>Zaozao Scriber</h1>
+        <p class="subtitle" id="connection-subtitle">Inicializando...</p>
+      </div>
+      <button class="btn-settings-icon" id="btn-open-settings" title="Configurações">⚙</button>
+    </div>
 
     <div class="tab-bar">
       <button class="tab active" data-tab="recording">Gravação</button>
@@ -489,6 +787,54 @@
 
       <!-- Log da transcrição/narrativa -->
       <div id="transcribe-log"></div>
+    </div>
+  </div>
+
+  <!-- Overlay: Configurações -->
+  <div id="settings-overlay" class="settings-overlay">
+    <div class="settings-overlay-inner">
+      <div class="settings-overlay-header">
+        <h1>Configurações</h1>
+        <button class="btn-settings-close" id="btn-close-settings" title="Voltar">&times;</button>
+      </div>
+      <div class="settings-scroll">
+
+        <h2 class="settings-section-title">Transcrição (Whisper)</h2>
+        <div id="transcription-chain-list"></div>
+        <button class="btn-secondary btn-small" id="btn-add-transcription-provider">+ Adicionar provedor</button>
+
+        <h2 class="settings-section-title">Narrativa (LLM)</h2>
+        <div id="provider-chain-list"></div>
+        <button class="btn-secondary btn-small" id="btn-add-provider">+ Adicionar LLM</button>
+
+        <h2 class="settings-section-title">Prompts da Narrativa</h2>
+        <label>Prompt de Condensa&ccedil;&atilde;o (por trecho)</label>
+        <textarea id="settings-condense-prompt" class="settings-textarea" rows="8"></textarea>
+
+        <label>Prompt Final (narrativa completa)</label>
+        <textarea id="settings-final-prompt" class="settings-textarea" rows="8"></textarea>
+
+        <h2 class="settings-section-title">Personagens do Discord</h2>
+        <table class="characters-table">
+          <thead>
+            <tr>
+              <th>Discord ID</th>
+              <th>Nome do Personagem</th>
+              <th>Papel</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="characters-tbody"></tbody>
+        </table>
+        <button class="btn-secondary btn-small" id="btn-add-character">+ Adicionar personagem</button>
+
+        <div class="btn-row" style="flex-wrap:nowrap;">
+          <button class="btn-primary" id="btn-save-settings">Salvar configura&ccedil;&otilde;es</button>
+          <button class="btn-secondary" id="btn-reload-settings">Descartar altera&ccedil;&otilde;es</button>
+        </div>
+        <div id="settings-save-feedback" class="settings-feedback"></div>
+
+      </div>
     </div>
   </div>
 

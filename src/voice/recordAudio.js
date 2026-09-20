@@ -4,6 +4,7 @@ import wav from 'wav';
 import { createWriteStream, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { Transform } from 'stream';
+import { getOutputDir } from '../paths.js';
 
 
 const RESUMABLE_WINDOW_MS = 3 * 60 * 60 * 1000; // 3 horas
@@ -31,9 +32,7 @@ export function startRecording(voiceChannel, options = {}) {
   const sessionFolder = options.existingFolder
     ? options.existingFolder
     : join(
-        process.cwd(),
-        'src',
-        'output',
+        getOutputDir(),
         `sessao-${new Date().toISOString().replace(/[:.]/g, '-')}`
       );
 
@@ -147,7 +146,7 @@ export function isPaused(guildId) {
 }
 
 export function findResumableSession() {
-  const outputDir = join(process.cwd(), 'src', 'output');
+  const outputDir = getOutputDir();
   if (!existsSync(outputDir)) return null;
 
   const folders = readdirSync(outputDir)

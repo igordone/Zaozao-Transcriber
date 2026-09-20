@@ -1,16 +1,20 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, basename } from 'path';
 
 import { loadConfig } from './config.js';
+import { getCharactersPath, getEnvPath } from './paths.js';
 import { mergeSessionAudio } from './mergeAudio.js';
 import { transcribeMergedWithGroq } from './providers/transcribeGroq.js';
 import { transcribeMergedWithLocalWhisper } from './providers/transcribeLocal.js';
 import { transcribeMergedWithFallback } from './providers/transcribeFallback.js';
+import { transcribeMergedWithCustomWhisper } from './providers/transcribeCustom.js';
 import { generateNarrative } from './narrate.js';
 
+dotenv.config({ path: getEnvPath() });
+
 function loadCharacterMap() {
-  const path = join(process.cwd(), 'src', 'characters.json');
+  const path = getCharactersPath();
   try {
     return JSON.parse(readFileSync(path, 'utf-8'));
   } catch {
@@ -84,9 +88,10 @@ export async function transcribeAudio(sessionFolder, onProgress) {
   const merged = await mergeSessionAudio(sessionFolder);
 
   const transcribeFn =
-    config.transcription.provider === 'local' ? (paths, cfg) => transcribeMergedWithLocalWhisper(paths.wavPath, cfg) :
-    config.transcription.provider === 'fallback' ? transcribeMergedWithFallback :
-    (paths, cfg) => transcribeMergedWithGroq(paths.mp3Path, cfg);
+     config.transcription.provider === 'local' ? (paths, cfg) => transcribeMergedWithLocalWhisper(paths.wavPath, cfg) :
+     config.transcription.provider === 'fallback' ? transcribeMergedWithFallback :
+     config.transcription.provider === 'custom' ? (paths, cfg) => transcribeMergedWithCustomWhisper(paths.mp3Path, cfg.transcription.custom) :
+     (paths, cfg) => transcribeMergedWithGroq(paths.mp3Path, cfg);
 
   const entries = [];
   const outputPath = join(sessionFolder, 'transcricao.md');
@@ -134,8 +139,13 @@ export async function generateSessionNarrative(sessionFolder, onProgress) {
     throw new Error('Transcrição não encontrada. Transcreva os áudios primeiro.');
   }
 
-  if (!config.narrative || !config.narrative.provider) {
-    throw new Error('Narrativa desabilitada ou sem provedor na configuração (config.yaml).');
+  if (!config.narrative || !config.narrative.enabled) {
+    throw new Error('Narrativa desabilitada na configuração (config.yaml).');
+  }
+
+  const hasChain = config.narrative.chain && Array.isArray(config.narrative.chain) && config.narrative.chain.length > 0;
+  if (!hasChain && !config.narrative.provider) {
+    throw new Error('Narrativa sem provedor configurado (chain ou provider).');
   }
 
   const narrativeStart = Date.now();
