@@ -21,8 +21,6 @@ O projeto inclui tanto um **bot de Discord** (executado via terminal) quanto um 
 | Interface Desktop | Electron |
 | Processamento de áudio | ffmpeg, wav |
 
-> **Segurança:** Todas as chaves de API ficam no `.env` (gitignored) e são resolvidas via variáveis de ambiente. O `config.yaml` usa `${VAR}` para referenciá-las, nunca valores hardcoded.
-
 ---
 
 ## 🖼️ Interface do App
