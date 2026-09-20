@@ -409,9 +409,3 @@ Isso permite processar sessões inteiras sem exceder o contexto do LLM.
 | `.wav` mudo para alguém | Cliente Discord desatualizado | Atualizar o app do Discord |
 | `429` na Groq | Rate limit | Fallback já lida automaticamente |
 | `api_key` vazio no provider | Variável de ambiente não definida no `.env` | Verificar se a variável existe e está correta |
-
----
-
-## 📄 Licença
-
-Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
